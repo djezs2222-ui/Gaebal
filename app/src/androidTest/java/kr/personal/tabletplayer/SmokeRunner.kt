@@ -50,13 +50,14 @@ class SmokeRunner: Instrumentation() {
                 val firstFrame=brightness(); check(firstFrame>5.0) { "Decoded output is black" }
                 Thread.sleep(1100); check(player.time>before) { "Video clock did not advance" }
                 check(kotlin.math.abs(brightness()-firstFrame)>3.0) { "Video pixels did not advance" }
+                runOnMainSync { player.pause() }
                 val viewport=field("viewport") as View
                 val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
                 val cx=coords[0]+viewport.width/2f; val cy=coords[1]+viewport.height/2f
                 val overlay=field("overlay") as View
                 check(overlay.alpha==.5f) { "Default opacity" }
                 Thread.sleep(3300); check(overlay.visibility==View.GONE) { "Default 3-second controls did not auto-hide" }
-                swipe(cx,cy,cx,cy)
+                tap(cx,cy)
                 Thread.sleep(400)
                 check(overlay.visibility==View.VISIBLE) { "Single tap did not reveal controls" }
                 Thread.sleep(3300); check(overlay.visibility==View.GONE) { "Controls did not hide after tap" }
@@ -164,9 +165,9 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { PlayerActivity::class.java.getDeclaredField("segmentEnabled").apply { isAccessible=true }.setBoolean(activity,false) }
         val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
         val x=coords[0]+viewport.width/2f; val y=coords[1]+viewport.height*.3f
-        swipe(x,y,x,y); Thread.sleep(80); swipe(x,y,x,y); Thread.sleep(400)
+        tap(x,y); Thread.sleep(80); tap(x,y); Thread.sleep(400)
         check(player.isPlaying) { "Center double tap did not resume" }
-        swipe(x,y,x,y); Thread.sleep(80); swipe(x,y,x,y); Thread.sleep(400)
+        tap(x,y); Thread.sleep(80); tap(x,y); Thread.sleep(400)
         check(!player.isPlaying) { "Center double tap did not pause" }
         val lx=coords[0]+viewport.width*.15f
         swipe(lx,y,lx,y-100); Thread.sleep(250)
@@ -179,9 +180,9 @@ class SmokeRunner: Instrumentation() {
         key(KeyEvent.KEYCODE_DPAD_DOWN); check(audio.getStreamVolume(AudioManager.STREAM_MUSIC)<=volume) { "Keyboard volume down" }
         val rx=coords[0]+viewport.width*.85f
         runOnMainSync { player.time=10000 }; Thread.sleep(200)
-        swipe(lx,y,lx,y); Thread.sleep(80); swipe(lx,y,lx,y); Thread.sleep(350)
+        tap(lx,y); Thread.sleep(80); tap(lx,y); Thread.sleep(350)
         check(player.time in 6500L..7500L) { "Left double tap 3 seconds: ${player.time}" }
-        swipe(rx,y,rx,y); Thread.sleep(80); swipe(rx,y,rx,y); Thread.sleep(350)
+        tap(rx,y); Thread.sleep(80); tap(rx,y); Thread.sleep(350)
         check(player.time in 9500L..10500L) { "Right double tap 3 seconds: ${player.time}" }
         runOnMainSync { player.time=12000; player.play() }; Thread.sleep(250)
         val begin=PlayerActivity::class.java.getDeclaredMethod("beginHold",Int::class.javaPrimitiveType).apply { isAccessible=true }
@@ -286,6 +287,11 @@ class SmokeRunner: Instrumentation() {
             check(request("GET","bytes=${file.length()}-").first==416)
             check(request("HEAD",path=server.uri.toString()+"wrong").first==404)
         }
+    }
+    private fun tap(x:Float,y:Float) {
+        val down=SystemClock.uptimeMillis()
+        fun event(action:Int) { val e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,x,y,0); e.source=InputDevice.SOURCE_TOUCHSCREEN; sendPointerSync(e); e.recycle() }
+        event(MotionEvent.ACTION_DOWN); Thread.sleep(50); event(MotionEvent.ACTION_UP); waitForIdleSync()
     }
     private fun swipe(x:Float,y:Float,ex:Float,ey:Float) {
         val down=SystemClock.uptimeMillis()

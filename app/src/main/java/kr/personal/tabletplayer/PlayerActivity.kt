@@ -290,7 +290,7 @@ class PlayerActivity : Activity() {
         fun span(e: MotionEvent, a: Int=0, b: Int=1): Float = kotlin.math.hypot(e.getX(a)-e.getX(b), e.getY(a)-e.getY(b))
         val gestures=GestureDetector(this,object:GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e:MotionEvent)=true
-            override fun onSingleTapConfirmed(e:MotionEvent):Boolean { if(!touchConsumed) showControls(); return true }
+            override fun onSingleTapUp(e:MotionEvent):Boolean { if(!touchConsumed) showControls(); return true }
             override fun onDoubleTap(e:MotionEvent):Boolean {
                 touchConsumed=true
                 when((e.x/viewport.width*3).toInt().coerceIn(0,2)) { 0->jump(-jumpSeconds); 1->togglePlaying(); 2->jump(jumpSeconds) }
