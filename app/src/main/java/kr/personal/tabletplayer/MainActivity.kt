@@ -19,6 +19,8 @@ data class Row(val node:Node,val name:String=node.name,val dir:Boolean=node.dire
     fun snapshot()=Snapshot(node,name,size,date)
 }
 class MainActivity: Activity() {
+    private var openedUri:String?=null
+    private val playlistFiles by lazy { PlaylistFiles(this) { items,index,title -> launchQueue(items,index,false,title) } }
     private val executor=Executors.newSingleThreadExecutor()
     private var cancel=AtomicBoolean(false)
     private lateinit var body: LinearLayout
@@ -37,6 +39,7 @@ class MainActivity: Activity() {
     private var returnStack=listOf<Pair<String,Node>>()
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
+        openedUri=state?.getString("openedUri"); playlistFiles.restore(state)
         contentResolver.persistedUriPermissions.filter { it.isReadPermission }.forEach { grant -> try { roots.add((prefs.getString("label:${grant.uri}",null) ?: "연결된 저장소") to Storage.tree(this,grant.uri)) } catch(_:Exception) {} }
         home()
     }
@@ -66,7 +69,8 @@ class MainActivity: Activity() {
         button("NAS 연결 (SMB)") { nas() }
         if(!destinationMode) {
             button("동영상 파일 열기") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type="video/*"; addCategory(Intent.CATEGORY_OPENABLE); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) },2) }
-            button("재생목록") { playlist() }
+            button("저장한 재생목록 파일 열기") { playlistFiles.find() }
+            button("기존 재생목록") { playlist() }
             button("작업 로그") { logs() }
             note("처음에는 저장소별로 폴더 접근을 허용하세요. Android 제한으로 내부 저장소 루트나 Download 루트 대신 Movies 등 하위 폴더를 선택해야 할 수 있습니다. SD·USB는 연결된 경우 시스템 선택기에 나타납니다.")
             note("실험용 개인 앱 0.1 · NAS 암호는 앱 실행 중에만 유지됩니다. 이동·삭제 전 테스트 파일로 확인하세요.")
@@ -110,7 +114,7 @@ class MainActivity: Activity() {
             else {
                 val line=LinearLayout(this)
                 line.addView(CheckBox(this).apply { isChecked=selected.containsKey(row.node.id); setOnCheckedChangeListener { _,checked -> if(checked) selected[row.node.id]=row.snapshot() else selected.remove(row.node.id); status.text="${selected.size}개 선택 · 위 선택 메뉴를 눌러 작업" } })
-                line.addView(Button(this).apply { isAllCaps=false; text="${row.name}\n${row.size/1_000_000}MB · ${date(row.date)}"; setOnClickListener { if(!busy) play(listOf(row.node.id)) } },LinearLayout.LayoutParams(0,-2,1f))
+                line.addView(Button(this).apply { isAllCaps=false; text="${row.name}\n${row.size/1_000_000}MB · ${date(row.date)}"; setOnClickListener { if(!busy) playFolder(row.node.id,stack.last().second) } },LinearLayout.LayoutParams(0,-2,1f))
                 body.addView(line)
             }
         }
@@ -190,22 +194,66 @@ class MainActivity: Activity() {
     }
     private fun play(ids:List<String>,index:Int=0) {
         if(ids.isEmpty()) return
-        val queue=ArrayList(ids.take(100))
-        val launch=Intent(this,PlayerActivity::class.java).putStringArrayListExtra("queue",queue).putExtra("index",index.coerceAtMost(queue.lastIndex))
-        val content=queue.map { Uri.parse(it) }.filter { it.scheme=="content" }
-        if(content.isNotEmpty()) { launch.clipData=ClipData.newRawUri("선택한 영상",content.first()).apply { content.drop(1).forEach { addItem(ClipData.Item(it)) } }; launch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        background("재생목록 준비",{ ids.map { Playlists.entry(this,it) } }) { launchQueue(it,index,false,"선택 재생목록") }
+    }
+    private fun launchQueue(items:List<QueueEntry>,index:Int,temporary:Boolean,title:String) {
+        if(items.isEmpty()) return
+        // Metadata travels through a private cache file to avoid Android's Binder size limit.
+        val session=File(cacheDir,"queue-${java.util.UUID.randomUUID()}.json").apply { writeText(Playlists.encode(items)) }
+        val launch=Intent(this,PlayerActivity::class.java).putExtra("queueFile",session.name).putExtra("index",index.coerceIn(0,items.lastIndex)).putExtra("temporary",temporary).putExtra("queueTitle",title)
         startActivity(launch)
     }
+    private fun playFolder(id:String,parent:Node) {
+        background("폴더의 영상과 하위 폴더 확인 중",{ Playlists.scan(parent) { cancel.get() } }) { scan ->
+            val direct=scan.direct.toMutableList()
+            var at=direct.indexOfFirst { Playlists.sameDocument(it.id,id) }
+            if(at<0) {
+                val original=Playlists.entry(this,id)
+                val matches=direct.withIndex().filter { it.value.name==original.name && it.value.size==original.size && original.size>0 }
+                if(matches.size==1) at=matches.single().index
+            }
+            val chosen=direct.getOrNull(at)?.id ?: id
+            if(at<0) { fail(IllegalStateException("선택한 영상이 이 폴더에 없습니다. 영상이 들어 있는 폴더를 선택하세요")); return@background }
+            fun start(extra:List<QueueEntry>) { val all=QueueModel.unique(direct+extra); launchQueue(all,all.indexOfFirst { it.id==chosen }.coerceAtLeast(0),true,"임시 재생목록") }
+            if(scan.folders.isEmpty()) { start(emptyList()); return@background }
+            val checked=BooleanArray(scan.folders.size)
+            AlertDialog.Builder(this).setTitle("영상을 추가할 하위 폴더 선택")
+                .setMultiChoiceItems(scan.folders.map { "${it.label} (${it.videos.size}개·하위 포함)" }.toTypedArray(),checked) { _,n,value -> checked[n]=value }
+                .setPositiveButton("선택 완료") { _,_ ->
+                    val folders=scan.folders.filterIndexed { n,_->checked[n] }
+                    if(folders.isEmpty()) start(emptyList()) else AlertDialog.Builder(this).setTitle("선택한 폴더를 추가할까요?").setMessage(folders.joinToString("\n") { it.label })
+                        .setPositiveButton("추가") { _,_ -> start(folders.flatMap { it.videos }) }.setNegativeButton("추가 없이 재생") { _,_ -> start(emptyList()) }.setCancelable(false).show()
+                }.setNegativeButton("현재 폴더만 재생") { _,_ -> start(emptyList()) }.setCancelable(false).show()
+        }
+    }
+    private fun openedFile(id:String) {
+        background("영상 폴더 권한 확인",{ Playlists.parent(this,id) }) { parent ->
+            if(parent!=null) playFolder(id,parent) else {
+                openedUri=id
+                AlertDialog.Builder(this).setTitle("같은 폴더 영상으로 임시 목록 만들기").setMessage("Android의 파일 하나 열기 권한으로는 옆 파일을 읽을 수 없습니다. 선택한 영상이 들어 있는 폴더를 한 번 허용해 주세요.")
+                    .setPositiveButton("영상 폴더 선택") { _,_ ->
+                        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                        intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,Uri.parse(id)); startActivityForResult(intent,4)
+                    }.setNegativeButton("이 영상만 재생") { _,_ -> openedUri=null; background("영상 준비",{ Playlists.entry(this,id) }) { launchQueue(listOf(it),0,true,"임시 재생목록") } }.setCancelable(false).show()
+            }
+        }
+    }
+    override fun onSaveInstanceState(out:Bundle) { super.onSaveInstanceState(out); out.putString("openedUri",openedUri); playlistFiles.saveState(out) }
     private fun appendLog(text:String) { File(filesDir,"operations.log").appendText("${SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(java.util.Date())} $text\n") }
     private fun logs() { page("작업 로그"); button("저장소 목록") { home() }; button("로그 내보내기") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { type="text/plain"; putExtra(Intent.EXTRA_TITLE,"tabletplayer-log.txt") },3) }; note(File(filesDir,"operations.log").takeIf { it.exists() }?.readText()?.takeLast(60000) ?: "작업 기록이 없습니다") }
     private fun date(value:Long)=if(value<=0) "날짜 알 수 없음" else SimpleDateFormat("yyyy-MM-dd",Locale.US).format(java.util.Date(value))
     @Deprecated("Activity result") override fun onActivityResult(request:Int,result:Int,data:Intent?) {
         super.onActivityResult(request,result,data)
-        if(result!=RESULT_OK) return
+        if(playlistFiles.result(request,result,data)) return
+        if(result!=RESULT_OK) {
+            if(request==4) openedUri?.let { id -> openedUri=null; background("선택 영상 준비",{ Playlists.entry(this,id) }) { launchQueue(listOf(it),0,true,"임시 재생목록") } }
+            return
+        }
         val uri=data?.data ?: return
         try { when(request) {
             1 -> { contentResolver.takePersistableUriPermission(uri,if(data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0) Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION else Intent.FLAG_GRANT_READ_URI_PERMISSION); val label=prefs.getString("newLabel","연결된 저장소")!!; prefs.edit().putString("label:$uri",label).apply(); val node=Storage.tree(this,uri); roots.removeAll { it.second.id==node.id }; roots.add(label to node); home() }
-            2 -> { try { contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch(_:Exception) {}; play(listOf(uri.toString())) }
+            2 -> { try { contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch(_:Exception) {}; openedFile(uri.toString()) }
+            4 -> { contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION); val id=openedUri; openedUri=null; if(id!=null) playFolder(id,Storage.tree(this,uri)) }
             3 -> background("로그 저장",{ contentResolver.openOutputStream(uri)!!.use { it.write((File(filesDir,"operations.log").takeIf { f->f.exists() }?.readText() ?: "기록 없음").toByteArray()) } }) { Toast.makeText(this,"저장했습니다",Toast.LENGTH_SHORT).show() }
         } } catch(e:Exception) { fail(e) }
     }

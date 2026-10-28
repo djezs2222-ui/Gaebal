@@ -112,7 +112,9 @@ class SmokeRunner: Instrumentation() {
                 playbackUri=android.net.Uri.parse("content://${targetContext.packageName}.testmedia/denied")
                 activity=open(); waitForIdleSync()
                 await("Readable permission error") { (field("lastPlaybackError") as String).contains("E_PERMISSION") }
-                result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics; control opacity/single tap/auto-hide/options.\n")
+                runOnMainSync { activity!!.finish() }; Thread.sleep(500)
+                queueChecks(clip)
+                result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics; control opacity/single tap/auto-hide/options; temporary queue/navigation/sort/centering/auto-next/cleanup; named playlist create/append/dedupe/recent5.\n")
                 result.putInt("passed",28)
                 runOnMainSync { activity!!.finish() }
                 finish(Activity.RESULT_OK,result)
@@ -122,6 +124,63 @@ class SmokeRunner: Instrumentation() {
                 finish(Activity.RESULT_CANCELED,result)
             }
         }.start()
+    }
+    private fun queueChecks(clip:File) {
+        val entries=(0 until 21).map { n -> val f=File(targetContext.filesDir,"queue-video-$n.mp4"); clip.copyTo(f,true); QueueEntry(android.net.Uri.fromFile(f).toString(),"Video %02d.mp4".format(20-n),n.toLong()*100,21L-n) }
+        check(Playlists.decode(Playlists.encode(entries))==entries)
+        val session=File(targetContext.cacheDir,"queue-${java.util.UUID.randomUUID()}.json").apply { writeText(Playlists.encode(entries)) }
+        val a=startActivitySync(Intent(targetContext,PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("queueFile",session.name).putExtra("temporary",true).putExtra("index",10)) as PlayerActivity
+        fun field(name:String):Any=PlayerActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(a)!!
+        fun method(name:String)=PlayerActivity::class.java.getDeclaredMethod(name).apply { isAccessible=true }
+        fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
+        val player=field("player") as MediaPlayer
+        await("Queue initial video") { player.isPlaying && player.time>500 }
+        runOnMainSync { method("currentQueue").invoke(a) }; waitForIdleSync()
+        var dialog=field("queueDialog") as AlertDialog
+        var list:android.widget.ListView?=null
+        runOnMainSync { list=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.ListView>().single() }
+        Thread.sleep(300)
+        check(list!!.adapter.count==21 && list!!.checkedItemPosition==10)
+        check(list!!.firstVisiblePosition<10 && list!!.lastVisiblePosition>10) { "Playing row was not centered" }
+        fun sortBySize() {
+            runOnMainSync { descendants(dialog.window!!.decorView).filterIsInstance<android.widget.Button>().first { it.text.startsWith("정렬:") }.performClick() }
+            waitForIdleSync()
+            val node=uiAutomation.rootInActiveWindow.findAccessibilityNodeInfosByText("크기순").firstOrNull() ?: error("Sort popup missing")
+            check(node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)); waitForIdleSync()
+            dialog=field("queueDialog") as AlertDialog
+            runOnMainSync { list=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.ListView>().single() }
+        }
+        sortBySize(); check((field("queue") as List<*>).first()==entries.first().id)
+        sortBySize(); check((field("queue") as List<*>).first()==entries.last().id)
+        check((field("queue") as List<*>)[field("index") as Int]==entries[10].id) { "Sorting changed playing identity" }
+        runOnMainSync { list!!.performItemClick(null,2,2) }
+        await("Queue row immediate playback") { field("index")==2 && player.isPlaying && player.time>300 }
+        check((field("queue") as List<*>).size==21 && field("temporary")==true) { "Selecting row rebuilt temporary queue" }
+        // Actual named documents, using an unexported SAF fixture provider.
+        val files=PlaylistFiles(a) { _,_,_ -> }
+        val folder=android.provider.DocumentsContract.buildTreeDocumentUri(targetContext.packageName+".testlists","lists")
+        val prefs=targetContext.getSharedPreferences("playlistFiles",0); prefs.edit().clear().putString("folder",folder.toString()).commit()
+        val create=PlaylistFiles::class.java.getDeclaredMethod("create",String::class.java,List::class.java).apply { isAccessible=true }
+        for(n in 0..5) {
+            runOnMainSync { create.invoke(files,"테스트$n",listOf(entries[0])) }
+            await("Named list save $n") { try { val recent=org.json.JSONArray(prefs.getString("recent","[]")); recent.length()>0 && recent.getJSONObject(0).getString("name")=="테스트$n.tplaylist.json" } catch(_:Exception) { false } }
+        }
+        val recent=org.json.JSONArray(prefs.getString("recent","[]")); check(recent.length()==5); check(recent.getJSONObject(4).getString("name")=="테스트1.tplaylist.json")
+        val id=recent.getJSONObject(0).getString("id")
+        val add=PlaylistFiles::class.java.getDeclaredMethod("add",String::class.java,List::class.java).apply { isAccessible=true }
+        runOnMainSync { add.invoke(files,id,listOf(entries[0],entries[1])) }
+        await("Named append and dedupe") { try { val stored=Storage.resolve(targetContext,id).input().use { it.readBytes().toString(Charsets.UTF_8) }; Playlists.decode(stored)==entries.take(2) } catch(_:Exception) { false } }
+        // Provider write is verified before the progress dialog is dismissed.
+        Thread.sleep(500)
+        runOnMainSync { player.play(); player.time=player.length-700 }
+        await("Sequential next video") { field("index")==3 && player.isPlaying }
+        runOnMainSync { method("currentQueue").invoke(a) }; waitForIdleSync(); dialog=field("queueDialog") as AlertDialog
+        runOnMainSync { list=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.ListView>().single(); list!!.performItemClick(null,20,20) }
+        await("Last video playing") { field("index")==20 && player.isPlaying && player.time>300 }
+        runOnMainSync { player.time=player.length-700 }
+        await("Temporary queue removed at end") { a.isFinishing && (field("queue") as List<*>).isEmpty() }
+        await("Temporary queue file removed") { !session.exists() }
+        sendStatus(1,Bundle().apply { putString("stream","PASS playlist: 21-row centering, ascending/descending sort keeps video identity, direct jump without rebuild, sequential next, final temporary cleanup; named SAF documents create/append/dedupe/recent5.\n") })
     }
     private fun await(label:String,condition:()->Boolean) { val deadline=SystemClock.uptimeMillis()+60000; while(SystemClock.uptimeMillis()<deadline) { if(condition()) return; Thread.sleep(200) }; error("Timeout: $label") }
     private fun bridgeChecks(file:File) {
