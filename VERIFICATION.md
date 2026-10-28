@@ -1,13 +1,13 @@
 # 구현·빌드·검증 결과
 
-2026-10-28 / 태블릿 플레이어 0.1.1 / GitHub 테스트 릴리스
+2026-10-28 / 태블릿 플레이어 0.1.2 / GitHub 테스트 릴리스
 
 ## 바로 설치
 
-- [ARM64 APK 직접 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.1-7/TabletPlayer-0.1.1-arm64.apk)
-- [다운로드 페이지](https://github.com/djezs2222-ui/Gaebal/releases/tag/player-test-0.1.1-7)
+- [ARM64 APK 직접 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.2-9/TabletPlayer-0.1.2-arm64.apk)
+- [다운로드 페이지](https://github.com/djezs2222-ui/Gaebal/releases/tag/player-test-0.1.2-9)
 - [소스 PR #1](https://github.com/djezs2222-ui/Gaebal/pull/1)
-- [성공한 자동 빌드·통합 테스트](https://github.com/djezs2222-ui/Gaebal/actions/runs/40645338279)
+- [성공한 자동 빌드·통합 테스트](https://github.com/djezs2222-ui/Gaebal/actions/runs/40646880761)
 
 Android 8 이상 ARM64 태블릿에서 APK를 열어 설치합니다. Android가 요청하면 다운로드에 사용한 브라우저/파일 앱의 ‘출처를 알 수 없는 앱 설치’를 허용합니다. PC 명령어 입력은 필요하지 않습니다.
 
@@ -29,7 +29,7 @@ Android 8 이상 ARM64 태블릿에서 APK를 열어 설치합니다. Android가
 | 네이티브 정렬 | 배포 ARM64 APK의 libc++_shared.so/libvlc.so/libvlcjni.so LOAD 구간 모두 16KB 정렬 확인 |
 | 게시·다운로드 | GitHub 테스트 릴리스 게시 성공, 실제 파일 다운로드 후 SHA-256 일치 확인 |
 
-검증한 앱 코드 커밋: `86e477df9ba1834799cb62417ff59124577cadee`.
+검증한 앱 코드 커밋: `6b777a08b2249db0ce3c7329dc2d59b8e76f42bb`.
 
 기기 테스트 원문 결과:
 
@@ -37,7 +37,7 @@ Android 8 이상 ARM64 태블릿에서 APK를 열어 설치합니다. Android가
 
 단위 테스트는 검색 프리셋의 500MB 경계·확장자·날짜·최대값, 하위 폴더 검색, 정상 복사/이동, 복사 손상, 취소, 원본 변경, 기존/선택 파일 이름 중복, 공간 부족/불명, 읽기 전용 원본/목적지를 확인합니다. 메모리 모형 저장소를 사용하므로 실제 장치 전송 시험을 대체하지 않습니다.
 
-## 0.1.1 재생 실패 수정
+## 0.1.2 재생 실패 수정
 
 이전 버전은 Android 문서 제공자의 content URI를 VLC 네이티브 경로로 바로 넘겼습니다. 이제 ContentResolver로 읽기용 AssetFileDescriptor를 열어 VLC에 전달하고, 재생 중 핸들을 유지하며 파일 변경·종료 시 닫습니다. 파일의 시작 오프셋·길이도 전달합니다. 영상 전체를 임시 복사하지 않습니다.
 
@@ -78,7 +78,14 @@ Android 정책상 내부 저장소 루트·Download 루트 등은 선택할 수 
 ## 배포 파일 식별
 
 - APK 크기: 60,668,314바이트
-- APK SHA-256: `2e48c1ba100ad332c199e33bf09492cfc16a541f0b5f2a3d10d3372bf11be8fc`
-- 서명: 다운로드한 0.1.1 APK의 v2 서명 검증 통과. 이전 APK와 서명키가 달라 연속 업데이트는 미보장
+- APK SHA-256: `9c99248b8851353451cd63c7ab582b5b7cd0cf1894a5022eb2eee14bc9de1efa`
+- 서명: 다운로드한 0.1.2 APK의 v2 서명 검증 통과. 이전 APK와 서명키가 달라 연속 업데이트는 미보장
 - 애플리케이션 ID: `kr.personal.tabletplayer`
 - LibVLC 3.7.7 / jcifs-ng 2.1.10 / Java 17 / Gradle 9.5.0 / AGP 9.3.1
+
+
+## 0.1.2 컨트롤 검증
+
+기본 불투명도 50%, 기본 숨김 500ms, 한 번 화면 터치 시 표시/다시 숨김을 Android 35 에뮬레이터에서 확인했습니다. 옵션 창에서 불투명도 70%와 숨김 1.2초를 저장하고 적용 및 재실행 후 유지됨을 확인했습니다. 0.15초 입력은 거부합니다. 기존 파일/문서 URI 재생·프레임·핀치·팬·탐색·이어보기 검증도 통과했습니다. Fold 7 / Android 17의 제조사 파일 선택기와 실제 영상은 실기기 재검증이 필요합니다.
+
+다운로드한 0.1.2 APK는 versionCode 3, 서명 검증과 GitHub 게시 SHA-256 일치를 확인했습니다. 인증서 SHA-256은 bec83c736dbe0ecd1e8d78c79b1db00fc7128b125439e4cd4480f4d9555a0b55이며, 기존 0.1.0 및 0.1.1 CI APK와 키가 다릅니다. 기존 버전 위 설치가 거부될 수 있습니다. 삭제 후 설치하면 앱 내 재생목록·이어보기·연결 설정이 초기화됩니다. 저장소의 원본 영상은 삭제되지 않습니다. 안정된 배포 서명키 설정은 아직 완료하지 못했습니다.
