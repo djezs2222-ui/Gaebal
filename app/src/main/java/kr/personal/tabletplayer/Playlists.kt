@@ -69,12 +69,14 @@ object Playlists {
 /** Named playlists are user-visible JSON documents in a user-selected folder. */
 class PlaylistFiles(private val activity:Activity,private val launch:(List<QueueEntry>,Int,String)->Unit) {
     companion object { const val CHOOSE_FOLDER=41; const val FIND_LIST=42 }
+    var lastError=""
+        private set
     private val prefs=activity.getSharedPreferences("playlistFiles",0)
     private var pendingStateFile="playlist-pending-${java.util.UUID.randomUUID()}.json"
     private var pendingName=""
     private var pendingItems=emptyList<QueueEntry>()
     private fun error(e:Throwable)=AlertDialog.Builder(activity).setTitle("재생목록 확인").setMessage(e.message ?: "작업 실패").setPositiveButton("닫기",null).show()
-    private fun work(job:()->Unit) { val progress=ProgressDialog.show(activity,"재생목록","처리 중…",true,false); Thread { try { job() } catch(e:Exception) { activity.runOnUiThread { if(!activity.isFinishing) error(e) } } finally { activity.runOnUiThread { progress.dismiss() } } }.start() }
+    private fun work(job:()->Unit) { val progress=ProgressDialog.show(activity,"재생목록","처리 중…",true,false); Thread { try { job() } catch(e:Exception) { lastError=android.util.Log.getStackTraceString(e); android.util.Log.e("PlaylistFiles","Playlist operation failed",e); activity.runOnUiThread { if(!activity.isFinishing) error(e) } } finally { activity.runOnUiThread { progress.dismiss() } } }.start() }
     private fun recent():List<Pair<String,String>> { val a=JSONArray(prefs.getString("recent","[]")); return (0 until a.length()).map { a.getJSONObject(it).let { o->o.getString("id") to o.getString("name") } }.distinctBy { it.first }.take(5) }
     private fun remember(id:String,name:String) { val a=JSONArray(); (listOf(id to name)+recent()).distinctBy { it.first }.take(5).forEach { a.put(JSONObject().put("id",it.first).put("name",it.second)) }; prefs.edit().putString("recent",a.toString()).apply() }
     private fun read(node:Node):List<QueueEntry> { val bytes=node.input().use { it.readBytesLimited() }; return Playlists.decode(String(bytes,Charsets.UTF_8)) }

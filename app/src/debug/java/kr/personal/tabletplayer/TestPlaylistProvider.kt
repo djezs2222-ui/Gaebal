@@ -16,6 +16,7 @@ class TestPlaylistProvider:DocumentsProvider() {
     override fun queryRoots(projection:Array<out String>?):Cursor=MatrixCursor(projection ?: arrayOf(Root.COLUMN_ROOT_ID,Root.COLUMN_DOCUMENT_ID,Root.COLUMN_TITLE,Root.COLUMN_FLAGS)).apply { addRow(columnNames.map { when(it) { Root.COLUMN_ROOT_ID->"fixture"; Root.COLUMN_DOCUMENT_ID->"lists"; Root.COLUMN_TITLE->"Test lists"; Root.COLUMN_FLAGS->Root.FLAG_SUPPORTS_CREATE; else->null } }) }
     override fun queryDocument(id:String,projection:Array<out String>?):Cursor=MatrixCursor(projection ?: columns).also { require(file(id).exists()); row(it,id) }
     override fun queryChildDocuments(parent:String,projection:Array<out String>?,sort:String?):Cursor=MatrixCursor(projection ?: columns).also { cursor -> require(parent=="lists"); root().listFiles().orEmpty().forEach { row(cursor,"lists/"+it.name) } }
+    override fun isChildDocument(parent:String,child:String)=parent=="lists" && child.startsWith("lists/") && !child.removePrefix("lists/").contains('/')
     override fun createDocument(parent:String,mime:String,name:String):String { require(parent=="lists"); validateName(name); val id="lists/$name"; require(file(id).createNewFile()); return id }
     override fun openDocument(id:String,mode:String,signal:CancellationSignal?):ParcelFileDescriptor=ParcelFileDescriptor.open(file(id),ParcelFileDescriptor.parseMode(mode))
     override fun deleteDocument(id:String) { require(id!="lists"); require(file(id).delete()) }

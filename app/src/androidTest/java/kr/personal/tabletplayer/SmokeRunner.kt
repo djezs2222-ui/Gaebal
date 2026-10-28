@@ -163,13 +163,13 @@ class SmokeRunner: Instrumentation() {
         val create=PlaylistFiles::class.java.getDeclaredMethod("create",String::class.java,List::class.java).apply { isAccessible=true }
         for(n in 0..5) {
             runOnMainSync { create.invoke(files,"테스트$n",listOf(entries[0])) }
-            await("Named list save $n") { try { val recent=org.json.JSONArray(prefs.getString("recent","[]")); recent.length()>0 && recent.getJSONObject(0).getString("name")=="테스트$n.tplaylist.json" } catch(_:Exception) { false } }
+            await("Named list save $n") { check(files.lastError.isEmpty()) { files.lastError }; try { val recent=org.json.JSONArray(prefs.getString("recent","[]")); recent.length()>0 && recent.getJSONObject(0).getString("name")=="테스트$n.tplaylist.json" } catch(_:Exception) { false } }
         }
         val recent=org.json.JSONArray(prefs.getString("recent","[]")); check(recent.length()==5); check(recent.getJSONObject(4).getString("name")=="테스트1.tplaylist.json")
         val id=recent.getJSONObject(0).getString("id")
         val add=PlaylistFiles::class.java.getDeclaredMethod("add",String::class.java,List::class.java).apply { isAccessible=true }
         runOnMainSync { add.invoke(files,id,listOf(entries[0],entries[1])) }
-        await("Named append and dedupe") { try { val stored=Storage.resolve(targetContext,id).input().use { it.readBytes().toString(Charsets.UTF_8) }; Playlists.decode(stored)==entries.take(2) } catch(_:Exception) { false } }
+        await("Named append and dedupe") { check(files.lastError.isEmpty()) { files.lastError }; try { val stored=Storage.resolve(targetContext,id).input().use { it.readBytes().toString(Charsets.UTF_8) }; Playlists.decode(stored)==entries.take(2) } catch(_:Exception) { false } }
         // Provider write is verified before the progress dialog is dismissed.
         Thread.sleep(500)
         runOnMainSync { player.play(); player.time=player.length-700 }
