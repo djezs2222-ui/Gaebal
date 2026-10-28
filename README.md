@@ -1,10 +1,10 @@
-# 태블릿 플레이어 0.1.2
+# 태블릿 플레이어 0.1.3
 
-**0.1.2: Android 파일 선택기로 연 영상의 입력 처리를 수정했습니다. 문서 주소·한글 파일명·오프셋·권한 오류 회귀 검증과 기존 재생·핀치·팬 검증을 통과했습니다.**
+**0.1.3: 폴더 임시 목록, 현재 목록 보기·정렬·즉시 이동과 이름 있는 목록 파일 저장을 추가했습니다. 목록 통합 검증 통과. 이전 수정: Android 파일 선택기로 연 영상의 입력 처리를 수정했습니다. 문서 주소·한글 파일명·오프셋·권한 오류 회귀 검증과 기존 재생·핀치·팬 검증을 통과했습니다.**
 
-[APK 바로 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.2-9/TabletPlayer-0.1.2-arm64.apk) · [검증 결과](VERIFICATION.md)
+[APK 바로 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.3-17/TabletPlayer-0.1.3-arm64.apk) · [검증 결과](VERIFICATION.md)
 
-개인 실사용을 위한 Kotlin + LibVLC Android 앱의 첫 테스트 버전입니다. 태블릿용 설치 파일은 `TabletPlayer-0.1.2-arm64.apk`입니다. Android 8 이상 ARM64 기기를 대상으로 합니다. 실제 태블릿·NAS·SD·USB 검증은 아직 완료되지 않았습니다.
+개인 실사용을 위한 Kotlin + LibVLC Android 앱의 첫 테스트 버전입니다. 태블릿용 설치 파일은 `TabletPlayer-0.1.3-arm64.apk`입니다. Android 8 이상 ARM64 기기를 대상으로 합니다. 실제 태블릿·NAS·SD·USB 검증은 아직 완료되지 않았습니다.
 
 ## 태블릿에서 설치
 
