@@ -88,9 +88,10 @@ jobs:
             adb install -r $(find test-apks -name app-debug-androidTest.apk)
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
+            adb logcat -c
             adb shell am instrument -w kr.personal.tabletplayer.test/kr.personal.tabletplayer.SmokeRunner | tee device-smoke.txt
             adb exec-out run-as kr.personal.tabletplayer cat files/smoke-zoom.png > device-zoom.png || true
-            adb logcat -d -t 400 > device-logcat.txt
+            adb logcat -d > device-logcat.txt
             grep -q 'PASS:' device-smoke.txt
       - uses: actions/upload-artifact@v4
         if: always()

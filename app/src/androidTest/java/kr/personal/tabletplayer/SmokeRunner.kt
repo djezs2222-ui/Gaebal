@@ -118,6 +118,7 @@ class SmokeRunner: Instrumentation() {
                 activity=open(); waitForIdleSync()
                 await("Readable permission error") { (field("lastPlaybackError") as String).contains("E_PERMISSION") }
                 runOnMainSync { activity!!.finish() }; Thread.sleep(500)
+                orientationChecks(clip)
                 queueChecks(clip)
                 nasDialogChecks()
                 result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics; control opacity/single tap/auto-hide/options; temporary queue/navigation/sort/centering/auto-next/cleanup; named playlist create/append/dedupe/recent5.\n")
@@ -130,6 +131,26 @@ class SmokeRunner: Instrumentation() {
                 finish(Activity.RESULT_CANCELED,result)
             }
         }.start()
+    }
+    private fun orientationChecks(clip:File) {
+        val a=startActivitySync(Intent(targetContext,PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("uri",android.net.Uri.fromFile(clip).toString())) as PlayerActivity
+        try {
+            fun field(name:String):Any=PlayerActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(a)!!
+            val player=field("player") as MediaPlayer; val viewport=field("viewport") as View
+            await("Rotation video ready") { player.isPlaying && player.time>500 }
+            check(a.requestedOrientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR) { "Sensor orientation not enabled" }
+            runOnMainSync { a.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            await("Landscape layout") { a.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE && viewport.width>viewport.height && a.hasWindowFocus() }
+            check(field("player")===player) { "Landscape recreated playback" }
+            val at=player.time; Thread.sleep(1100)
+            check(player.isPlaying && player.time>at) { "Playback stopped after landscape rotation" }
+            runOnMainSync { a.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+            await("Portrait layout") { a.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT && viewport.height>viewport.width && a.hasWindowFocus() }
+            check(field("player")===player) { "Portrait recreated playback" }
+            val back=player.time; Thread.sleep(1100)
+            check(player.isPlaying && player.time>back) { "Playback stopped after portrait rotation" }
+            sendStatus(1,Bundle().apply { putString("stream","PASS orientation: sensor policy, landscape/portrait layouts, same player and continuing playback.\n") })
+        } finally { runOnMainSync { a.finish() } }
     }
     private fun nasDialogChecks() {
         targetContext.getSharedPreferences("library",0).edit().putBoolean("setupShown",true).commit()
@@ -185,17 +206,10 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { player.time=3100; method("checkSegments").invoke(activity) }
         Thread.sleep(250); check(player.time in 4500L..5500L) { "Segment loop advances: ${player.time}" }
         runOnMainSync { PlayerActivity::class.java.getDeclaredField("segmentEnabled").apply { isAccessible=true }.setBoolean(activity,false) }
-        check(activity.requestedOrientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR) { "Sensor orientation not enabled" }
-        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
-        await("Landscape layout") { activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE && viewport.width>viewport.height }
-        check(field("player")===player) { "Rotation recreated playback" }
-        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
-        await("Portrait layout") { activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT && viewport.height>viewport.width }
-        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR }
         val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
         val x=coords[0]+viewport.width/2f; val y=coords[1]+viewport.height*.3f
         tap(x,y); Thread.sleep(80); tap(x,y); Thread.sleep(400)
-        check(player.isPlaying) { "Center double tap did not resume" }
+        check(player.isPlaying) { "Center double tap did not resume; ready=${field("ready")}, viewport=${viewport.width}x${viewport.height}, focus=${activity.hasWindowFocus()}" }
         tap(x,y); Thread.sleep(80); tap(x,y); Thread.sleep(400)
         check(!player.isPlaying) { "Center double tap did not pause" }
         val lx=coords[0]+viewport.width*.15f
