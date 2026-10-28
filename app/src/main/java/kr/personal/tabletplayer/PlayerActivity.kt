@@ -71,21 +71,45 @@ class PlayerActivity : Activity() {
                 MediaPlayer.Event.EncounteredError -> Toast.makeText(this,"재생 실패: 경로 또는 NAS 연결을 확인하세요",Toast.LENGTH_LONG).show()
             }
         } }
-        val detector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(d: ScaleGestureDetector): Boolean {
-                scale = (scale * d.scaleFactor).coerceIn(1f, 5f)
-                video.scaleX=scale; video.scaleY=scale; clampPan(); return true
-            }
-        })
+        var previousSpan = 0f
+        var focusX = 0f
+        var focusY = 0f
+        fun span(e: MotionEvent, a: Int=0, b: Int=1): Float = kotlin.math.hypot(e.getX(a)-e.getX(b), e.getY(a)-e.getY(b))
         viewport.setOnTouchListener { _, e ->
-            detector.onTouchEvent(e)
             when(e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { px=e.x; py=e.y }
-                MotionEvent.ACTION_MOVE -> {
-                    if(e.pointerCount==1 && !detector.isInProgress && scale>1f) { video.translationX += e.x-px; video.translationY += e.y-py; clampPan() }
-                    px=e.x; py=e.y
+                MotionEvent.ACTION_DOWN -> { px=e.x; py=e.y; previousSpan=0f }
+                MotionEvent.ACTION_POINTER_DOWN -> if(e.pointerCount>=2) {
+                    previousSpan=span(e); focusX=(e.getX(0)+e.getX(1))/2; focusY=(e.getY(0)+e.getY(1))/2
                 }
-                MotionEvent.ACTION_POINTER_UP -> { val n=if(e.actionIndex==0) 1 else 0; if(n<e.pointerCount) { px=e.getX(n); py=e.getY(n) } }
+                MotionEvent.ACTION_MOVE -> {
+                    if(e.pointerCount>=2) {
+                        val nextSpan=span(e)
+                        val nextX=(e.getX(0)+e.getX(1))/2; val nextY=(e.getY(0)+e.getY(1))/2
+                        if(previousSpan>1f && nextSpan>1f) {
+                            val nextScale=(scale*nextSpan/previousSpan).coerceIn(1f,5f)
+                            val ratio=nextScale/scale
+                            // Preserve the video point under the fingers while their centroid moves.
+                            video.translationX=video.translationX*ratio+(nextX-viewport.width/2f)-(focusX-viewport.width/2f)*ratio
+                            video.translationY=video.translationY*ratio+(nextY-viewport.height/2f)-(focusY-viewport.height/2f)*ratio
+                            scale=nextScale; video.scaleX=scale; video.scaleY=scale; clampPan()
+                        }
+                        previousSpan=nextSpan; focusX=nextX; focusY=nextY
+                    } else {
+                        if(scale>1f) { video.translationX+=e.x-px; video.translationY+=e.y-py; clampPan() }
+                        px=e.x; py=e.y
+                    }
+                }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    val remaining=(0 until e.pointerCount).filter { it!=e.actionIndex }
+                    if(remaining.size>=2) {
+                        val a=remaining[0]; val b=remaining[1]; previousSpan=span(e,a,b)
+                        focusX=(e.getX(a)+e.getX(b))/2; focusY=(e.getY(a)+e.getY(b))/2
+                    } else {
+                        previousSpan=0f
+                        remaining.firstOrNull()?.let { px=e.getX(it); py=e.getY(it) }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> previousSpan=0f
             }; true
         }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {

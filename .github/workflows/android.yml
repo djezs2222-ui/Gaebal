@@ -89,12 +89,17 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell am instrument -w kr.personal.tabletplayer.test/kr.personal.tabletplayer.SmokeRunner | tee device-smoke.txt
+            adb exec-out run-as kr.personal.tabletplayer cat files/smoke-zoom.png > device-zoom.png || true
+            adb logcat -d -t 400 > device-logcat.txt
             grep -q 'PASS:' device-smoke.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Device-smoke-result
-          path: device-smoke.txt
+          path: |
+            device-smoke.txt
+            device-zoom.png
+            device-logcat.txt
   release:
     if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/codex/') || startsWith(github.ref, 'refs/tags/player-v'))
     needs: [apk, device-smoke]
@@ -112,3 +117,4 @@ jobs:
           RELEASE_TAG: player-test-0.1.0-${{ github.run_number }}
         run: |
           gh release create "$RELEASE_TAG" apk/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Tablet Player 0.1.0 test ${{ github.run_number }}" --notes 'Personal test APK. Build, unit tests and emulator playback/gesture checks passed. Actual tablet, NAS, SD/USB and subtitle rendering remain unverified. CI signing differs from the local APK unless DEBUG_KEYSTORE_BASE64 is configured.' --prerelease
+

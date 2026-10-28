@@ -27,7 +27,27 @@ class SmokeRunner: Instrumentation() {
                 var player=field("player") as MediaPlayer
                 runOnMainSync { player.play() }
                 try { await("VLC playback start") { player.isPlaying && player.time>500 } } catch(e:Exception) { error("Playback time=${player.time}, length=${player.length}, playing=${player.isPlaying}") }
-                val before=player.time; Thread.sleep(1100); check(player.time>before) { "Video clock did not advance" }
+                val before=player.time
+                val videoView=field("video") as View
+                fun texture(view:View):TextureView? {
+                    if(view is TextureView) return view
+                    if(view is ViewGroup) for(n in 0 until view.childCount) texture(view.getChildAt(n))?.let { return it }
+                    return null
+                }
+                var decoded:TextureView?=null
+                await("Decoded TextureView") { runOnMainSync { decoded=texture(videoView) }; decoded?.isAvailable==true }
+                fun brightness():Double {
+                    var average=0.0
+                    runOnMainSync {
+                        val bitmap=decoded!!.getBitmap(32,32) ?: error("No decoded bitmap")
+                        val pixels=IntArray(1024); bitmap.getPixels(pixels,0,32,0,0,32,32)
+                        average=pixels.map { android.graphics.Color.red(it) }.average(); bitmap.recycle()
+                    }
+                    return average
+                }
+                val firstFrame=brightness(); check(firstFrame>5.0) { "Decoded output is black" }
+                Thread.sleep(1100); check(player.time>before) { "Video clock did not advance" }
+                check(kotlin.math.abs(brightness()-firstFrame)>3.0) { "Video pixels did not advance" }
                 val viewport=field("viewport") as View
                 val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
                 val cx=coords[0]+viewport.width/2f; val cy=coords[1]+viewport.height/2f
@@ -36,6 +56,7 @@ class SmokeRunner: Instrumentation() {
                 check(video.scaleX>1.4f) { "Pinch zoom was not applied: ${video.scaleX}" }
                 swipe(cx,cy,cx+90,cy+60)
                 check(kotlin.math.abs(video.translationX)>10f || kotlin.math.abs(video.translationY)>10f) { "Pan was not applied" }
+                uiAutomation.takeScreenshot()?.let { image -> File(targetContext.filesDir,"smoke-zoom.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; image.recycle() }
                 runOnMainSync { player.rate=1.5f }
                 check(kotlin.math.abs(player.rate-1.5f)<.05f) { "Playback rate not applied" }
                 runOnMainSync { player.time=7000L }
@@ -45,8 +66,8 @@ class SmokeRunner: Instrumentation() {
                 runOnMainSync { activity!!.finish() }; Thread.sleep(700)
                 activity=open(); player=field("player") as MediaPlayer
                 await("Resume position") { player.isPlaying && player.time>=saved-1200 }
-                result.putString("stream","PASS: HTTP HEAD/range/body/suffix/416/token checks; generated AVC playback; advancing clock; injected two-finger pinch; drag pan; 1.5x speed; seeking; persisted resume.\n")
-                result.putInt("passed",13)
+                result.putString("stream","PASS: HTTP HEAD/range/body/suffix/416/token checks; generated AVC playback; decoded changing pixels; advancing clock; injected two-finger pinch; drag pan; 1.5x speed; seeking; persisted resume.\n")
+                result.putInt("passed",15)
                 runOnMainSync { activity!!.finish() }
                 finish(Activity.RESULT_OK,result)
             } catch(e:Throwable) {
