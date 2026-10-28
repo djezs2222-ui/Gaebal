@@ -123,7 +123,7 @@ class PlayerActivity : Activity() {
     private fun endHold() {
         if(holdDirection==0) return
         holdDirection=0; handler.removeCallbacks(holdTick)
-        if(ready) { player.rate=holdRate; if(holdWasPlaying) player.play() }
+        if(ready) { player.rate=holdRate; if(holdWasPlaying) player.play() else player.pause() }
     }
     private fun rebuildShuffle() {
         shuffleRemaining=(queue.indices.filter { it!=index }).shuffled().toMutableList()

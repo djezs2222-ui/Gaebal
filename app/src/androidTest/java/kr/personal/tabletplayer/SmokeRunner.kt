@@ -190,7 +190,8 @@ class SmokeRunner: Instrumentation() {
         check(player.time<11500) { "Reverse hold did not seek backwards" }
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(250)
         check(player.isPlaying) { "Release did not restore playing state" }
-        runOnMainSync { player.pause(); begin.invoke(activity,2) }; Thread.sleep(700)
+        runOnMainSync { player.pause() }; await("Pause before forward hold") { !player.isPlaying }
+        runOnMainSync { begin.invoke(activity,2) }; Thread.sleep(700)
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(200)
         check(!player.isPlaying) { "Release did not preserve paused state" }
         runOnMainSync {
