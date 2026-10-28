@@ -6,7 +6,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.os.*
 import java.io.File
-/** Private debug fixture: only a dedicated app-private folder is reachable. */
+/** Debug fixture protected by MANAGE_DOCUMENTS; only a dedicated test folder is reachable. */
 class TestPlaylistProvider:DocumentsProvider() {
     override fun onCreate()=true
     private fun root()=File(context!!.filesDir,"playlist-fixtures").apply { mkdirs() }
