@@ -194,16 +194,18 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { begin.invoke(activity,2) }; Thread.sleep(700)
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(200)
         check(!player.isPlaying) { "Release did not preserve paused state" }
+        runOnMainSync { method("controlOptions").invoke(activity) }
+        waitForIdleSync()
+        val savedDialog=field("controlsDialog") as AlertDialog
         runOnMainSync {
-            method("controlOptions").invoke(activity)
-            val dialog=field("controlsDialog") as AlertDialog
             fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
-            val fields=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.EditText>()
+            val fields=descendants(savedDialog.window!!.decorView).filterIsInstance<android.widget.EditText>()
             listOf("4","6","12","31","4","3").forEachIndexed { n,value -> fields[n+1].setText(value) }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            check(!dialog.isShowing) { "Valid playback options rejected" }
-            player.play()
+            savedDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         }
+        waitForIdleSync()
+        check(!savedDialog.isShowing) { "Valid playback options rejected" }
+        runOnMainSync { player.play() }
         sendStatus(1,Bundle().apply { putString("stream","PASS interactions: keyboard seek/modifier sides, four bracket segments/markers/cycling, center double tap, brightness swipe, reverse/forward hold state restoration.\n") })
     }
     private fun queueChecks(clip:File) {
