@@ -39,6 +39,13 @@ object Storage {
         sessions[root]=context
         return SmbNode(root,context).also { require(it.directory) { "공유 폴더를 열 수 없습니다" }; it.children() }
     }
+    fun shares(host:String,domain:String,user:String,password:String):List<String> {
+        require(host.matches(Regex("[a-zA-Z0-9.:-]+"))) { "서버 주소에는 IP 또는 호스트 이름만 입력하세요" }
+        val props=Properties().apply { setProperty("jcifs.smb.client.minVersion","SMB202"); setProperty("jcifs.smb.client.maxVersion","SMB311"); setProperty("jcifs.smb.client.responseTimeout","5000"); setProperty("jcifs.smb.client.connTimeout","3000") }
+        val context=BaseContext(PropertyConfiguration(props)).withCredentials(NtlmPasswordAuthenticator(domain,user,password))
+        return try { SmbFile("smb://$host/",context).use { server -> server.listFiles().mapNotNull { child -> child.use { val name=it.name.trimEnd('/'); name.takeIf { name.isNotBlank() && !name.equals("IPC$",true) && it.isDirectory } } }.distinct().sorted() } }
+        finally { try { context.close() } catch(_:Exception) {} }
+    }
     fun resolve(context: Context,id: String): Node {
         if(id.startsWith("smb://")) {
             val key=sessions.keys.firstOrNull { id.startsWith(it) } ?: error("NAS에 다시 로그인하세요")

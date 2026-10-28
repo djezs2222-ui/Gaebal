@@ -119,6 +119,7 @@ class SmokeRunner: Instrumentation() {
                 await("Readable permission error") { (field("lastPlaybackError") as String).contains("E_PERMISSION") }
                 runOnMainSync { activity!!.finish() }; Thread.sleep(500)
                 queueChecks(clip)
+                nasDialogChecks()
                 result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics; control opacity/single tap/auto-hide/options; temporary queue/navigation/sort/centering/auto-next/cleanup; named playlist create/append/dedupe/recent5.\n")
                 result.putInt("passed",28)
                 runOnMainSync { activity!!.finish() }
@@ -130,6 +131,27 @@ class SmokeRunner: Instrumentation() {
             }
         }.start()
     }
+    private fun nasDialogChecks() {
+        targetContext.getSharedPreferences("library",0).edit().putBoolean("setupShown",true).commit()
+        val a=startActivitySync(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        try {
+            await("Library window") { a.hasWindowFocus() }
+            runOnMainSync { MainActivity::class.java.getDeclaredMethod("nas").apply { isAccessible=true }.invoke(a) }
+            waitForIdleSync()
+            fun field(name:String):Any?=MainActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(a)
+            val dialog=field("nasDialog") as AlertDialog
+            fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
+            var lookupPresent=false
+            runOnMainSync {
+                lookupPresent=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.Button>().any { it.text=="선택 서버의 공유 폴더 찾기" }
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+            }
+            waitForIdleSync()
+            check(lookupPresent) { "NAS share lookup UI missing" }
+            check(field("nasDiscovery")==null && !dialog.isShowing) { "NAS discovery did not stop on close" }
+            sendStatus(1,Bundle().apply { putString("stream","PASS NAS discovery dialog: share lookup UI and cancellation lifecycle (no real NAS tested).\n") })
+        } finally { runOnMainSync { a.finish() } }
+    }
     private fun interactionChecks(activity:PlayerActivity,player:MediaPlayer,viewport:View) {
         fun field(name:String):Any=PlayerActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(activity)!!
         fun method(name:String)=PlayerActivity::class.java.getDeclaredMethod(name).apply { isAccessible=true }
@@ -138,7 +160,7 @@ class SmokeRunner: Instrumentation() {
             activity.dispatchKeyEvent(KeyEvent(0,SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,code,0,meta))
         }; Thread.sleep(250) }
         runOnMainSync { player.pause(); player.time=12000 }; Thread.sleep(300)
-        key(KeyEvent.KEYCODE_DPAD_LEFT); check(player.time in 8500L..9500L) { "Default keyboard 3 seconds: ${player.time}" }
+        key(KeyEvent.KEYCODE_DPAD_LEFT); check((field("seekFeedback") as android.widget.TextView).text=="−3초") { "Signed seek feedback" }; check(player.time in 8500L..9500L) { "Default keyboard 3 seconds: ${player.time}" }
         key(KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.META_ALT_RIGHT_ON or KeyEvent.META_ALT_ON)
         check(player.time in 13500L..14500L) { "Right Alt 5 seconds: ${player.time}" }
         key(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.META_CTRL_LEFT_ON or KeyEvent.META_CTRL_ON)
@@ -163,6 +185,13 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { player.time=3100; method("checkSegments").invoke(activity) }
         Thread.sleep(250); check(player.time in 4500L..5500L) { "Segment loop advances: ${player.time}" }
         runOnMainSync { PlayerActivity::class.java.getDeclaredField("segmentEnabled").apply { isAccessible=true }.setBoolean(activity,false) }
+        check(activity.requestedOrientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR) { "Sensor orientation not enabled" }
+        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+        await("Landscape layout") { activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE && viewport.width>viewport.height }
+        check(field("player")===player) { "Rotation recreated playback" }
+        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+        await("Portrait layout") { activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT && viewport.height>viewport.width }
+        runOnMainSync { activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR }
         val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
         val x=coords[0]+viewport.width/2f; val y=coords[1]+viewport.height*.3f
         tap(x,y); Thread.sleep(80); tap(x,y); Thread.sleep(400)
@@ -186,7 +215,13 @@ class SmokeRunner: Instrumentation() {
         check(player.time in 9500L..10500L) { "Right double tap 3 seconds: ${player.time}" }
         runOnMainSync { player.time=12000; player.play() }; Thread.sleep(250)
         val begin=PlayerActivity::class.java.getDeclaredMethod("beginHold",Int::class.javaPrimitiveType).apply { isAccessible=true }
-        runOnMainSync { begin.invoke(activity,0) }; Thread.sleep(900)
+        runOnMainSync {
+            PlayerActivity::class.java.getDeclaredField("hideDelayMs").apply { isAccessible=true }.setLong(activity,100)
+            begin.invoke(activity,0)
+            (field("hideControls") as Runnable).run()
+        }; Thread.sleep(900)
+        check((field("overlay") as View).visibility==View.VISIBLE) { "Controls hid during hold seeking" }
+        check((field("seekFeedback") as View).visibility==View.VISIBLE) { "Hold feedback hidden" }
         check(player.time<11500) { "Reverse hold did not seek backwards" }
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(250)
         check(player.isPlaying) { "Release did not restore playing state" }
@@ -194,7 +229,10 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { begin.invoke(activity,2) }; Thread.sleep(700)
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(200)
         check(!player.isPlaying) { "Release did not preserve paused state" }
-        runOnMainSync { method("controlOptions").invoke(activity) }
+        runOnMainSync {
+            PlayerActivity::class.java.getDeclaredField("hideDelayMs").apply { isAccessible=true }.setLong(activity,1200)
+            method("controlOptions").invoke(activity)
+        }
         waitForIdleSync()
         val savedDialog=field("controlsDialog") as AlertDialog
         runOnMainSync {

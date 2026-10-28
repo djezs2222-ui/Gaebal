@@ -19,6 +19,8 @@ data class Row(val node:Node,val name:String=node.name,val dir:Boolean=node.dire
     fun snapshot()=Snapshot(node,name,size,date)
 }
 class MainActivity: Activity() {
+    private var nasDiscovery:NasDiscovery?=null
+    private var nasDialog:AlertDialog?=null
     private var openedUri:String?=null
     private val playlistFiles by lazy { PlaylistFiles(this) { items,index,title -> launchQueue(items,index,false,title) } }
     private val executor=Executors.newSingleThreadExecutor()
@@ -179,13 +181,64 @@ class MainActivity: Activity() {
         }.setNegativeButton("취소",null).show()
     }
     private fun nas() {
+        nasDialog?.dismiss()
         val form=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,8,24,8) }
         fun input(hint:String)=EditText(this).apply { this.hint=hint; inputType=InputType.TYPE_CLASS_TEXT; form.addView(this) }
         val host=input("서버 IP 또는 호스트 이름"); val share=input("공유 폴더 이름"); val domain=input("도메인 · 선택"); val user=input("사용자 이름 · 게스트는 빈칸"); val password=input("암호").apply { inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        AlertDialog.Builder(this).setTitle("NAS · SMB2/3 연결").setView(form).setPositiveButton("연결") { _,_ ->
-            val h=host.text.toString().trim(); val s=share.text.toString().trim(); val d=domain.text.toString(); val u=user.text.toString(); val p=password.text.toString(); password.text.clear()
-            background("NAS 연결 중",{ Storage.connect(h,s,d,u,p) }) { root -> roots.removeAll { it.second.id==root.id }; roots.add("NAS $h / $s" to root); home() }
-        }.setNegativeButton("취소",null).show()
+        val lookup=Button(this).apply { text="선택 서버의 공유 폴더 찾기" }; form.addView(lookup)
+        val shareStatus=TextView(this); form.addView(shareStatus)
+        val shareRows=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; form.addView(shareRows)
+        form.addView(TextView(this).apply { text="현재 Wi-Fi에서 발견한 SMB 서버 · 아래에서 선택"; textSize=18f })
+        val discoveryStatus=TextView(this); form.addView(discoveryStatus)
+        val retry=Button(this).apply { text="다시 검색" }; form.addView(retry)
+        val servers=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; form.addView(servers)
+        val discovered=linkedMapOf<String,Button>()
+        val dialog=AlertDialog.Builder(this).setTitle("NAS · SMB2/3 연결").setView(ScrollView(this).apply { addView(form) }).setPositiveButton("연결",null).setNegativeButton("취소",null).create()
+        nasDialog=dialog
+        var lookupGeneration=0
+        fun clearShares() { lookupGeneration++; lookup.isEnabled=true; shareRows.removeAllViews(); shareStatus.text="" }
+        listOf(host,domain,user,password).forEach { field -> field.addTextChangedListener(object:android.text.TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) { clearShares() }
+            override fun afterTextChanged(s:android.text.Editable?) {}
+        }) }
+        lookup.setOnClickListener {
+            val h=host.text.toString().trim(); if(h.isBlank()) { host.error="서버를 선택하거나 주소를 입력하세요"; return@setOnClickListener }
+            val d=domain.text.toString(); val u=user.text.toString(); val p=password.text.toString()
+            val generation=++lookupGeneration; lookup.isEnabled=false; shareStatus.text="공유 폴더 확인 중…"; shareRows.removeAllViews()
+            Thread {
+                try {
+                    val names=Storage.shares(h,d,u,p)
+                    runOnUiThread { if(dialog.isShowing && generation==lookupGeneration) {
+                        shareStatus.text=if(names.isEmpty()) "보이는 공유 폴더가 없습니다. 공유 이름을 직접 입력하세요." else "공유 폴더를 선택하세요"
+                        names.forEach { name -> shareRows.addView(Button(this).apply { text=name; setOnClickListener { share.setText(name); shareStatus.text="선택: $name · 연결을 누르세요" } }) }
+                    } }
+                } catch(_:Exception) { runOnUiThread { if(dialog.isShowing && generation==lookupGeneration) shareStatus.text="공유 폴더 조회 실패 · 계정/암호를 확인하거나 공유 이름을 직접 입력하세요." } }
+                finally { runOnUiThread { if(dialog.isShowing && generation==lookupGeneration) lookup.isEnabled=true } }
+            }.start()
+        }
+        fun scan() {
+            nasDiscovery?.close(); servers.removeAllViews(); discovered.clear()
+            nasDiscovery=NasDiscovery(this,{ ip,name ->
+                if(dialog.isShowing) {
+                    val row=discovered.getOrPut(ip) { Button(this).also { button -> servers.addView(button); button.setOnClickListener { host.setText(ip); share.setText(""); clearShares(); discoveryStatus.text="선택: ${button.text} · 계정 입력 후 공유 폴더 찾기" } } }
+                    row.text=if(name==ip) ip else "$name · $ip"
+                }
+            },{ message -> if(dialog.isShowing) discoveryStatus.text=message }).also { it.start() }
+        }
+        retry.setOnClickListener { scan() }
+        dialog.setOnDismissListener { lookupGeneration++; nasDiscovery?.close(); nasDiscovery=null; password.text.clear(); nasDialog=null }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val h=host.text.toString().trim(); val sh=share.text.toString().trim()
+                if(h.isBlank()) { host.error="서버를 선택하거나 주소를 입력하세요"; return@setOnClickListener }
+                if(sh.isBlank()) { share.error="공유 폴더를 선택하거나 입력하세요"; return@setOnClickListener }
+                val d=domain.text.toString(); val u=user.text.toString(); val p=password.text.toString(); password.text.clear(); dialog.dismiss()
+                background("NAS 연결 중",{ Storage.connect(h,sh,d,u,p) }) { root -> roots.removeAll { it.second.id==root.id }; roots.add("NAS $h / $sh" to root); home() }
+            }
+            scan()
+        }
+        dialog.show()
     }
     private fun savedQueue():List<Pair<String,String>> { val a=JSONArray(prefs.getString("playlist","[]")); return (0 until a.length()).map { a.getJSONObject(it).let { o->o.getString("id") to o.getString("name") } } }
     private fun saveQueue(items:List<Pair<String,String>>) { val a=JSONArray(); items.forEach { a.put(JSONObject().put("id",it.first).put("name",it.second)) }; prefs.edit().putString("playlist",a.toString()).apply() }
@@ -268,7 +321,7 @@ class MainActivity: Activity() {
         } } catch(e:Exception) { fail(e) }
     }
     @Deprecated("Back navigation") override fun onBackPressed() { if(busy) { Toast.makeText(this,"작업 창의 취소를 사용하세요",Toast.LENGTH_SHORT).show(); return }; if(destinationMode) exitDestination() else if(stack.isNotEmpty()) { if(stack.size>1) { stack.removeAt(stack.lastIndex); load() } else { stack.clear(); home() } } else super.onBackPressed() }
-    override fun onDestroy() { cancel.set(true); executor.shutdown(); super.onDestroy() }
+    override fun onDestroy() { nasDialog?.dismiss(); nasDiscovery?.close(); cancel.set(true); executor.shutdown(); super.onDestroy() }
 }
 
 

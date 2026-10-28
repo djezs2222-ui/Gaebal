@@ -4,6 +4,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackRulesTest {
+    @Test fun signedFeedbackShowsWholeAndFractionalSeconds() {
+        assertEquals("−3초",PlaybackRules.seekLabel(-3000)); assertEquals("+10초",PlaybackRules.seekLabel(10000))
+        assertEquals("+0.5초",PlaybackRules.seekLabel(500)); assertEquals("+0초",PlaybackRules.seekLabel(0))
+    }
     private val s=listOf(PlaybackRules.Segment(1000,2000),PlaybackRules.Segment(),PlaybackRules.Segment(5000,7000),PlaybackRules.Segment(9000,10000))
     @Test fun seekClampsAtBothEnds() { assertEquals(0L,PlaybackRules.seekTarget(2000,-3000,10000)); assertEquals(10000L,PlaybackRules.seekTarget(9000,3000,10000)) }
     @Test fun missingAndReversedSegmentsAreInvalid() { assertFalse(PlaybackRules.Segment().valid()); assertFalse(PlaybackRules.Segment(2000,1000).valid()); assertFalse(PlaybackRules.Segment(1000,1000).valid()) }

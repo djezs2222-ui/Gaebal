@@ -22,9 +22,17 @@ class PlayerActivity : Activity() {
     private var controlsDialog:AlertDialog?=null
     private var controlTouchActive=false
     private var optionsOpen=false
-    private val hideControls=Runnable { if(!dragging && !optionsOpen && !controlTouchActive) overlay.visibility=View.GONE }
-    private fun showControls() { overlay.visibility=View.VISIBLE; handler.removeCallbacks(hideControls); if(!dragging && !optionsOpen && !controlTouchActive) handler.postDelayed(hideControls,hideDelayMs) }
+    private val hideControls=Runnable { if(!dragging && !optionsOpen && !controlTouchActive && holdDirection==0) overlay.visibility=View.GONE }
+    private fun showControls() { overlay.visibility=View.VISIBLE; handler.removeCallbacks(hideControls); if(!dragging && !optionsOpen && !controlTouchActive && holdDirection==0) handler.postDelayed(hideControls,hideDelayMs) }
     private lateinit var clock: TextView
+    private lateinit var seekFeedback:TextView
+    private val hideFeedback=Runnable { if(holdDirection==0) seekFeedback.visibility=View.GONE }
+    private var holdStartTime=0L
+    private fun feedback(delta:Long,holding:Boolean=false) {
+        seekFeedback.text=PlaybackRules.seekLabel(delta)+(if(holding) " · ${holdRate*holdMultiplier}×" else "")
+        seekFeedback.visibility=View.VISIBLE; handler.removeCallbacks(hideFeedback)
+        if(!holding) handler.postDelayed(hideFeedback,1200)
+    }
     private val handler = Handler(Looper.getMainLooper())
     private var scale = 1f
     private var px = 0f
@@ -81,6 +89,7 @@ class PlayerActivity : Activity() {
         override fun run() {
             if(holdDirection==0 || !ready) return
             seekTo(player.time+(holdDirection*holdRate*holdMultiplier*120).toLong())
+            feedback(player.time-holdStartTime,true)
             handler.postDelayed(this,120)
         }
     }
@@ -98,7 +107,12 @@ class PlayerActivity : Activity() {
     private fun seekTo(target:Long) {
         if(ready && player.isSeekable) player.time=target.coerceIn(0,player.length.coerceAtLeast(0))
     }
-    private fun jump(seconds:Int) { if(ready) { seekTo(player.time+seconds*1000L); showControls() } }
+    private fun jump(seconds:Int) {
+        if(ready && player.isSeekable) {
+            val before=player.time; val target=PlaybackRules.seekTarget(before,seconds*1000L,player.length)
+            seekTo(target); feedback(target-before); showControls()
+        }
+    }
     private fun togglePlaying() {
         if(!ready && queue.isNotEmpty()) { open(); showControls(); return }
         if(ready) { if(player.isPlaying) player.pause() else player.play(); showControls() }
@@ -115,15 +129,17 @@ class PlayerActivity : Activity() {
         Toast.makeText(this,"볼륨 ${(audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)*100f/max).toInt()}%",Toast.LENGTH_SHORT).show()
     }
     private fun beginHold(zone:Int) {
-        if(!ready || zone==1) return
+        if(!ready || zone==1 || isFinishing || isDestroyed) return
         touchConsumed=true; holdDirection=if(zone==0) -1 else 1
-        holdWasPlaying=player.isPlaying; holdRate=player.rate
+        holdWasPlaying=player.isPlaying; holdRate=player.rate; holdStartTime=player.time
+        showControls(); feedback(0,true)
         player.pause(); handler.post(holdTick)
     }
     private fun endHold() {
         if(holdDirection==0) return
         holdDirection=0; handler.removeCallbacks(holdTick)
-        if(ready) { player.rate=holdRate; if(holdWasPlaying) player.play() else player.pause() }
+        if(ready) { feedback(player.time-holdStartTime); player.rate=holdRate; if(holdWasPlaying) player.play() else player.pause() }
+        showControls()
     }
     private fun rebuildShuffle() {
         shuffleRemaining=(queue.indices.filter { it!=index }).shuffled().toMutableList()
@@ -208,12 +224,15 @@ class PlayerActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         loadSettings()
+        requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if(settings.contains("brightness")) window.attributes=window.attributes.apply { screenBrightness=settings.getFloat("brightness",.5f).coerceIn(.01f,1f) }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setOnApplyWindowInsetsListener { view, insets -> @Suppress("DEPRECATION") view.setPadding(0,insets.systemWindowInsetTop,0,insets.systemWindowInsetBottom); insets } }
         viewport = FrameLayout(this).apply { clipChildren = true; setBackgroundColor(0xff000000.toInt()) }
         video = VLCVideoLayout(this)
         viewport.addView(video, FrameLayout.LayoutParams(-1, -1))
+        seekFeedback=TextView(this).apply { textSize=26f; gravity=Gravity.CENTER; setTextColor(0xffffffff.toInt()); setBackgroundColor(0xbb000000.toInt()); setPadding(24,12,24,12); visibility=View.GONE }
+        viewport.addView(seekFeedback,FrameLayout.LayoutParams(-2,-2,Gravity.CENTER))
         root.addView(viewport, LinearLayout.LayoutParams(-1, 0, 1f))
         controlsOpacity=getPreferences(0).getInt("controlsOpacity",50).coerceIn(10,100)
         hideDelayMs=getPreferences(0).getLong("controlsHideMs",3000).coerceIn(100,60000)
@@ -396,6 +415,10 @@ class PlayerActivity : Activity() {
         dialog.setOnShowListener { list.post { list.setSelectionFromTop(index,(resources.displayMetrics.heightPixels*.55/2-36*resources.displayMetrics.density).toInt().coerceAtLeast(0)) } }
         dialog.show()
     }
+    override fun onConfigurationChanged(configuration:android.content.res.Configuration) {
+        super.onConfigurationChanged(configuration)
+        viewport.post { clampPan(); showControls() }
+    }
     override fun onSaveInstanceState(out:Bundle) {
         super.onSaveInstanceState(out)
         File(cacheDir,stateFileName).writeText(Playlists.encode(queueItems)); out.putString("queueStateFile",stateFileName); out.putInt("queueIndex",index); out.putBoolean("temporary",temporary); out.putString("queueTitle",queueTitle); out.putInt("queueSort",queueSort); out.putBoolean("queueDescending",queueDescending); playlistFiles.saveState(out)
@@ -496,7 +519,7 @@ class PlayerActivity : Activity() {
     private fun showPlaybackError(code:String,reason:String) {
         if(isFinishing || isDestroyed) return
         val source=Uri.parse(positionKey)
-        lastPlaybackError="오류 $code\n$reason\n\n입력: ${source.scheme ?: "unknown"} / $inputMode\n문서 제공자: ${if(source.scheme=="content") source.authority else "해당 없음"}\n디코딩: ${if(softwareOnly) "소프트웨어" else "자동"}\n기기: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n앱: 0.1.4 / LibVLC 3.7.7"
+        lastPlaybackError="오류 $code\n$reason\n\n입력: ${source.scheme ?: "unknown"} / $inputMode\n문서 제공자: ${if(source.scheme=="content") source.authority else "해당 없음"}\n디코딩: ${if(softwareOnly) "소프트웨어" else "자동"}\n기기: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n앱: 0.1.5 / LibVLC 3.7.7"
         File(filesDir,"playback-error.txt").writeText(lastPlaybackError)
         errorDialog?.dismiss()
         errorDialog=AlertDialog.Builder(this).setTitle("재생 실패").setMessage(lastPlaybackError)

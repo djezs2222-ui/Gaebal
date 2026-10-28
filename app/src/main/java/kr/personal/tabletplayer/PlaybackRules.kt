@@ -5,6 +5,11 @@ object PlaybackRules {
     data class Segment(val start:Long=-1,val end:Long=-1) {
         fun valid(length:Long=Long.MAX_VALUE)=start>=0 && end>start && end<=length
     }
+    fun seekLabel(delta:Long):String {
+        val seconds=kotlin.math.abs(delta)/1000.0
+        val value=if(delta%1000==0L) (kotlin.math.abs(delta)/1000).toString() else "%.1f".format(java.util.Locale.US,seconds)
+        return (if(delta<0) "−" else "+")+value+"초"
+    }
     fun seekTarget(time:Long,delta:Long,length:Long):Long=(time+delta).coerceIn(0,length.coerceAtLeast(0))
     fun segmentTarget(segments:List<Segment>,active:Int,time:Long):Pair<Int,Long>? {
         val valid=segments.indices.filter { segments[it].valid() }
