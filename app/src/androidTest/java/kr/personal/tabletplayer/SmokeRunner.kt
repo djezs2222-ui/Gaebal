@@ -53,6 +53,27 @@ class SmokeRunner: Instrumentation() {
                 val viewport=field("viewport") as View
                 val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
                 val cx=coords[0]+viewport.width/2f; val cy=coords[1]+viewport.height/2f
+                val overlay=field("overlay") as View
+                check(overlay.alpha==.5f) { "Default opacity" }
+                Thread.sleep(700); check(overlay.visibility==View.GONE) { "Controls did not auto-hide" }
+                swipe(cx,cy,cx,cy)
+                check(overlay.visibility==View.VISIBLE) { "Single tap did not reveal controls" }
+                Thread.sleep(700); check(overlay.visibility==View.GONE) { "Controls did not hide after tap" }
+                runOnMainSync { PlayerActivity::class.java.getDeclaredMethod("controlOptions").apply { isAccessible=true }.invoke(activity) }
+                val options=field("controlsDialog") as AlertDialog
+                fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
+                runOnMainSync {
+                    val views=descendants(options.window!!.decorView)
+                    views.filterIsInstance<android.widget.SeekBar>().single().progress=60
+                    views.filterIsInstance<android.widget.EditText>().single().setText("0.15")
+                    options.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                    check(options.isShowing) { "Invalid 0.1-second step accepted" }
+                    views.filterIsInstance<android.widget.EditText>().single().setText("1.2")
+                    options.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                }
+                check(kotlin.math.abs(overlay.alpha-.7f)<.001f) { "Opacity option not applied" }
+                Thread.sleep(700); check(overlay.visibility==View.VISIBLE) { "Custom timeout ignored" }
+                Thread.sleep(700); check(overlay.visibility==View.GONE) { "Custom timeout did not expire" }
                 pinch(cx,cy)
                 val video=field("video") as View
                 check(video.scaleX>1.4f) { "Pinch zoom was not applied: ${video.scaleX}" }
@@ -67,6 +88,7 @@ class SmokeRunner: Instrumentation() {
                 val saved=player.time
                 runOnMainSync { activity!!.finish() }; Thread.sleep(700)
                 activity=open(); player=field("player") as MediaPlayer
+                check(kotlin.math.abs((field("overlay") as View).alpha-.7f)<.001f && field("hideDelayMs")==1200L) { "Control preferences not retained" }
                 await("Resume position") { player.isPlaying && player.time>=saved-1200 }
                 runOnMainSync { activity!!.finish() }; Thread.sleep(700)
                 for((path,software) in listOf("영상 한글.mp4" to false,"offset.mp4" to true)) {
@@ -90,7 +112,7 @@ class SmokeRunner: Instrumentation() {
                 playbackUri=android.net.Uri.parse("content://${targetContext.packageName}.testmedia/denied")
                 activity=open(); waitForIdleSync()
                 await("Readable permission error") { (field("lastPlaybackError") as String).contains("E_PERMISSION") }
-                result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics.\n")
+                result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics; control opacity/single tap/auto-hide/options.\n")
                 result.putInt("passed",28)
                 runOnMainSync { activity!!.finish() }
                 finish(Activity.RESULT_OK,result)

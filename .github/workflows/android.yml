@@ -37,7 +37,7 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk dist/TabletPlayer-0.1.1-arm64.apk
+          cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk dist/TabletPlayer-0.1.2-arm64.apk
           cd dist && sha256sum *.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -114,7 +114,7 @@ jobs:
       - name: Publish downloadable test APK
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: player-test-0.1.1-${{ github.run_number }}
+          RELEASE_TAG: player-test-0.1.2-${{ github.run_number }}
         run: |
-          gh release create "$RELEASE_TAG" apk/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Tablet Player 0.1.1 test ${{ github.run_number }}" --notes 'Personal test APK. Build, unit tests and emulator playback/gesture checks passed. Android content URI descriptor, offset and permission-error checks passed. Actual tablet, NAS, SD/USB and subtitle rendering remain unverified. CI signing differs from the local APK unless DEBUG_KEYSTORE_BASE64 is configured.' --prerelease
+          gh release create "$RELEASE_TAG" apk/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Tablet Player 0.1.2 test ${{ github.run_number }}" --notes 'Personal test APK. Build, unit tests and emulator playback/gesture checks passed. Android content URI descriptor, offset and permission-error checks passed. Actual tablet, NAS, SD/USB and subtitle rendering remain unverified. CI signing differs from the local APK unless DEBUG_KEYSTORE_BASE64 is configured.' --prerelease
 

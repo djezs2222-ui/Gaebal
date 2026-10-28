@@ -1,10 +1,10 @@
-# 태블릿 플레이어 0.1.0
+# 태블릿 플레이어 0.1.1
 
-**클라우드 빌드와 재생·프레임·핀치·팬·배속·탐색·이어보기 검증을 통과했습니다.**
+**0.1.1: Android 파일 선택기로 연 영상의 입력 처리를 수정했습니다. 문서 주소·한글 파일명·오프셋·권한 오류 회귀 검증과 기존 재생·핀치·팬 검증을 통과했습니다.**
 
-[APK 바로 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.0-5/TabletPlayer-0.1.0-arm64.apk) · [검증 결과](VERIFICATION.md)
+[APK 바로 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.1-7/TabletPlayer-0.1.1-arm64.apk) · [검증 결과](VERIFICATION.md)
 
-개인 실사용을 위한 Kotlin + LibVLC Android 앱의 첫 테스트 버전입니다. 태블릿용 설치 파일은 `TabletPlayer-0.1.0-arm64.apk`입니다. Android 8 이상 ARM64 기기를 대상으로 합니다. 실제 태블릿·NAS·SD·USB 검증은 아직 완료되지 않았습니다.
+개인 실사용을 위한 Kotlin + LibVLC Android 앱의 첫 테스트 버전입니다. 태블릿용 설치 파일은 `TabletPlayer-0.1.1-arm64.apk`입니다. Android 8 이상 ARM64 기기를 대상으로 합니다. 실제 태블릿·NAS·SD·USB 검증은 아직 완료되지 않았습니다.
 
 ## 태블릿에서 설치
 
@@ -81,3 +81,8 @@ Windows Java에서 `Unable to establish loopback connection`이 발생하면 짧
 - `SmokeRunner.kt`: 자체 AVC 영상 생성 및 에뮬레이터 재생/제스처 테스트
 
 자세한 실제 실행 결과는 함께 제공하는 검증 결과 문서를 확인하십시오.
+
+
+## 0.1.2 재생 컨트롤
+
+기본 불투명도 50%, 영상 한 번 터치하면 표시 후 0.5초 자동 숨김. 옵션에서 불투명도 10~100%와 숨김 시간 0.1~60.0초(0.1초 단위)를 저장합니다. 탐색 막대 조작과 옵션 창 사용 중에는 숨김을 멈춥니다. 문서 입력 재생 수정도 포함합니다.
