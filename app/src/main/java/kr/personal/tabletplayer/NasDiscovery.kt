@@ -27,7 +27,7 @@ class NasDiscovery(context:Context,private val found:(String,String)->Unit,priva
     private var prefix=0
     private val results=hashSetOf<String>()
     fun start() {
-        val wifi=connectivity.allNetworks.firstOrNull { connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true }
+        val wifi=connectivity.allNetworks.firstOrNull { connectivity.getNetworkCapabilities(it)?.let { caps -> caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) }==true }
         val link=wifi?.let { connectivity.getLinkProperties(it) }?.linkAddresses?.firstOrNull { it.address is Inet4Address && Ipv4Plan.local(it.address.address) }
         if(wifi==null || link==null) { status("연결된 Wi-Fi의 로컬 IPv4 주소가 없습니다. Wi-Fi를 연결하거나 서버 주소를 직접 입력하세요."); close(); return }
         network=wifi; address=link.address.address; prefix=link.prefixLength
@@ -52,7 +52,8 @@ class NasDiscovery(context:Context,private val found:(String,String)->Unit,priva
     private fun probe(host:String,name:String) {
         if(closed.get()) return
         val wifi=network ?: return
-        if(connectivity.getNetworkCapabilities(wifi)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)!=true) return
+        val caps=connectivity.getNetworkCapabilities(wifi) ?: return
+        if(!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return
         var socket:Socket?=null
         try {
             socket=wifi.socketFactory.createSocket(); sockets.add(socket)
