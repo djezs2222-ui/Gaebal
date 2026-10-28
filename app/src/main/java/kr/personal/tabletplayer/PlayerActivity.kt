@@ -25,6 +25,12 @@ class PlayerActivity : Activity() {
     private var ready = false
     private var positionKey = ""
     private var bridge: SmbStreamServer? = null
+    private var activeInput: PlaybackInput? = null
+    private var inputGeneration=0
+    private var softwareOnly=false
+    private var inputMode="준비 중"
+    private var lastPlaybackError=""
+    private var errorDialog:AlertDialog?=null
     private var queue = arrayListOf<String>()
     private var index = 0
     private val tick = object : Runnable {
@@ -55,9 +61,11 @@ class PlayerActivity : Activity() {
         button("다음") { change(1) }
         button("배속") { val rates = floatArrayOf(.5f,.75f,1f,1.25f,1.5f,2f); AlertDialog.Builder(this).setItems(rates.map { "${it}×" }.toTypedArray()) { _, n -> player.rate = rates[n] }.show() }
         button("자막") { subtitles() }
+        button("디코딩") { AlertDialog.Builder(this).setTitle("디코딩 방식").setItems(arrayOf("자동", "소프트웨어 호환 모드")) { _,n -> savePosition(); softwareOnly=n==1; open() }.show() }
         button("화면 초기화") { scale=1f; video.scaleX=1f; video.scaleY=1f; video.translationX=0f; video.translationY=0f }
         root.addView(HorizontalScrollView(this).apply { addView(controls) })
         setContentView(root)
+        softwareOnly=intent.getBooleanExtra("software",false)
         vlc = LibVLC(this, arrayListOf("--network-caching=1500"))
         player = MediaPlayer(vlc)
         // TextureView is required: transforming a SurfaceView does not reliably transform video.
@@ -68,7 +76,7 @@ class PlayerActivity : Activity() {
             when(event.type) {
                 MediaPlayer.Event.Playing -> { if (!ready) { ready=true; player.time=getPreferences(0).getLong(positionKey,0); handler.post(tick) } }
                 MediaPlayer.Event.EndReached -> { getPreferences(0).edit().remove(positionKey).apply(); ready=false; handler.removeCallbacks(tick); if(index < queue.lastIndex) change(1) }
-                MediaPlayer.Event.EncounteredError -> Toast.makeText(this,"재생 실패: 경로 또는 NAS 연결을 확인하세요",Toast.LENGTH_LONG).show()
+                MediaPlayer.Event.EncounteredError -> showPlaybackError("E_VLC",if(positionKey.startsWith("smb:")) "NAS 영상 스트림을 재생하지 못했습니다. 연결·읽기 권한과 영상 형식을 확인하세요." else "파일 열기 단계 후 VLC 재생이 실패했습니다. 영상 형식·코덱을 확인하거나 소프트웨어 호환 모드를 시도하세요.")
             }
         } }
         var previousSpan = 0f
@@ -121,14 +129,50 @@ class PlayerActivity : Activity() {
     }
     private fun clampPan() { val x=viewport.width*(scale-1)/2; val y=viewport.height*(scale-1)/2; video.translationX=video.translationX.coerceIn(-x,x); video.translationY=video.translationY.coerceIn(-y,y) }
     private fun open() {
-        ready=false; handler.removeCallbacks(tick); bridge?.close(); bridge=null
+        val generation=++inputGeneration
+        ready=false; handler.removeCallbacks(tick); errorDialog?.dismiss()
+        player.stop(); activeInput?.close(); activeInput=null; bridge?.close(); bridge=null
         positionKey=queue[index]
+        val key=positionKey
+        inputMode="입력 준비 중"
         Thread {
+            var prepared:PlaybackInput?=null
+            var stream:SmbStreamServer?=null
             try {
-                val uri=if(positionKey.startsWith("smb:")) { SmbStreamServer(Storage.resolve(this,positionKey)).also { bridge=it }.uri } else Uri.parse(positionKey)
-                runOnUiThread { if(!isFinishing) { val media=Media(vlc,uri); player.media=media; media.release(); player.play() } }
-            } catch(e: Exception) { runOnUiThread { Toast.makeText(this,e.message,Toast.LENGTH_LONG).show() } }
+                val uri=if(key.startsWith("smb:")) { SmbStreamServer(Storage.resolve(this,key)).also { stream=it }.uri } else Uri.parse(key)
+                prepared=PlaybackInput.open(this,uri)
+                val input=prepared!!
+                runOnUiThread {
+                    if(generation!=inputGeneration || isFinishing || isDestroyed) { input.close(); stream?.close() }
+                    else {
+                        activeInput=input; bridge=stream; inputMode=input.mode
+                        try { val media=input.media(vlc); try { media.setHWDecoderEnabled(!softwareOnly,false); player.media=media } finally { media.release() }; player.play() }
+                        catch(e:Exception) { activeInput?.close(); activeInput=null; bridge?.close(); bridge=null; showPlaybackError("E_MEDIA",e.message ?: "VLC 입력 초기화 실패") }
+                    }
+                }
+            } catch(e:Exception) {
+                prepared?.close(); stream?.close()
+                runOnUiThread { if(generation==inputGeneration && !isFinishing && !isDestroyed) {
+                    val reason=when(e) {
+                        is SecurityException -> "영상 읽기 권한이 없습니다. 내부/SD/USB 폴더를 다시 연결하거나 파일을 다시 선택하세요."
+                        is java.io.FileNotFoundException -> "선택한 파일을 열 수 없습니다. 이동·삭제 여부와 저장소 연결을 확인하세요."
+                        else -> e.message ?: "입력을 열지 못했습니다"
+                    }
+                    showPlaybackError(if(e is SecurityException) "E_PERMISSION" else "E_OPEN",reason)
+                } }
+            }
         }.start()
+    }
+    private fun showPlaybackError(code:String,reason:String) {
+        if(isFinishing || isDestroyed) return
+        val source=Uri.parse(positionKey)
+        lastPlaybackError="오류 $code\n$reason\n\n입력: ${source.scheme ?: "unknown"} / $inputMode\n문서 제공자: ${if(source.scheme=="content") source.authority else "해당 없음"}\n디코딩: ${if(softwareOnly) "소프트웨어" else "자동"}\n기기: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n앱: 0.1.1 / LibVLC 3.7.7"
+        File(filesDir,"playback-error.txt").writeText(lastPlaybackError)
+        errorDialog?.dismiss()
+        errorDialog=AlertDialog.Builder(this).setTitle("재생 실패").setMessage(lastPlaybackError)
+            .setPositiveButton("닫기",null)
+            .setNeutralButton("진단정보 복사") { _,_ -> getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("재생 진단",lastPlaybackError)); Toast.makeText(this,"진단정보를 복사했습니다",Toast.LENGTH_SHORT).show() }
+            .setNegativeButton(if(softwareOnly) "자동 모드 재시도" else "소프트웨어 재시도") { _,_ -> softwareOnly=!softwareOnly; open() }.show()
     }
     private fun change(delta: Int) { val next=index+delta; if(next !in queue.indices) return; savePosition(); player.stop(); index=next; open() }
     private fun savePosition() { if(ready && player.time>0) getPreferences(0).edit().putLong(positionKey,player.time).apply() }
@@ -146,7 +190,7 @@ class PlayerActivity : Activity() {
         }
     }
     override fun onPause() { savePosition(); if(::player.isInitialized) player.pause(); super.onPause() }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); if(::player.isInitialized) { player.stop(); player.detachViews(); player.release(); vlc.release() }; bridge?.close(); super.onDestroy() }
+    override fun onDestroy() { inputGeneration++; errorDialog?.dismiss(); handler.removeCallbacksAndMessages(null); if(::player.isInitialized) { player.stop(); player.detachViews(); player.release(); vlc.release() }; activeInput?.close(); bridge?.close(); super.onDestroy() }
     private fun time(ms: Long): String { val s=(ms/1000).coerceAtLeast(0); return "%d:%02d:%02d".format(s/3600,s/60%60,s%60) }
 }
 

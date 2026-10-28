@@ -188,7 +188,14 @@ class MainActivity: Activity() {
             button("↑ 위로 / 목록에서 제거 · ${item.second}") { AlertDialog.Builder(this).setItems(arrayOf("위로 이동","목록에서 제거")) { _,action -> val list=queue.toMutableList(); if(action==0 && index>0) java.util.Collections.swap(list,index,index-1) else if(action==1) list.removeAt(index); saveQueue(list); playlist() }.show() }
         }
     }
-    private fun play(ids:List<String>,index:Int=0) { if(ids.isEmpty()) return; val queue=ArrayList(ids.take(100)); startActivity(Intent(this,PlayerActivity::class.java).putStringArrayListExtra("queue",queue).putExtra("index",index.coerceAtMost(queue.lastIndex))) }
+    private fun play(ids:List<String>,index:Int=0) {
+        if(ids.isEmpty()) return
+        val queue=ArrayList(ids.take(100))
+        val launch=Intent(this,PlayerActivity::class.java).putStringArrayListExtra("queue",queue).putExtra("index",index.coerceAtMost(queue.lastIndex))
+        val content=queue.map { Uri.parse(it) }.filter { it.scheme=="content" }
+        if(content.isNotEmpty()) { launch.clipData=ClipData.newRawUri("선택한 영상",content.first()).apply { content.drop(1).forEach { addItem(ClipData.Item(it)) } }; launch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        startActivity(launch)
+    }
     private fun appendLog(text:String) { File(filesDir,"operations.log").appendText("${SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(java.util.Date())} $text\n") }
     private fun logs() { page("작업 로그"); button("저장소 목록") { home() }; button("로그 내보내기") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply { type="text/plain"; putExtra(Intent.EXTRA_TITLE,"tabletplayer-log.txt") },3) }; note(File(filesDir,"operations.log").takeIf { it.exists() }?.readText()?.takeLast(60000) ?: "작업 기록이 없습니다") }
     private fun date(value:Long)=if(value<=0) "날짜 알 수 없음" else SimpleDateFormat("yyyy-MM-dd",Locale.US).format(java.util.Date(value))

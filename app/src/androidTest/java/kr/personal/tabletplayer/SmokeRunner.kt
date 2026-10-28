@@ -20,7 +20,9 @@ class SmokeRunner: Instrumentation() {
                 val clip=File(targetContext.filesDir,"smoke.mp4"); encode(clip)
                 sendStatus(1,Bundle().apply { putString("stream","Generated AVC clip; testing private HTTP range bridge.\n") })
                 bridgeChecks(clip)
-                fun open():Activity = startActivitySync(Intent(targetContext,PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("uri",android.net.Uri.fromFile(clip).toString()))
+                var playbackUri=android.net.Uri.fromFile(clip)
+                var forceSoftware=false
+                fun open():Activity = startActivitySync(Intent(targetContext,PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("uri",playbackUri.toString()).putExtra("software",forceSoftware))
                 activity=open(); waitForIdleSync(); await("Player window focus") { activity!!.hasWindowFocus() }
                 sendStatus(1,Bundle().apply { putString("stream","Player window focused; waiting for VLC playback.\n") })
                 fun field(name:String):Any=PlayerActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(activity)
@@ -66,8 +68,30 @@ class SmokeRunner: Instrumentation() {
                 runOnMainSync { activity!!.finish() }; Thread.sleep(700)
                 activity=open(); player=field("player") as MediaPlayer
                 await("Resume position") { player.isPlaying && player.time>=saved-1200 }
-                result.putString("stream","PASS: HTTP HEAD/range/body/suffix/416/token checks; generated AVC playback; decoded changing pixels; advancing clock; injected two-finger pinch; drag pan; 1.5x speed; seeking; persisted resume.\n")
-                result.putInt("passed",15)
+                runOnMainSync { activity!!.finish() }; Thread.sleep(700)
+                for((path,software) in listOf("영상 한글.mp4" to false,"offset.mp4" to true)) {
+                    playbackUri=android.net.Uri.Builder().scheme("content").authority(targetContext.packageName+".testmedia").appendPath(path).build()
+                    forceSoftware=software
+                    activity=open(); waitForIdleSync(); player=field("player") as MediaPlayer
+                    await("Document playback $path") { player.isPlaying && player.time>500 }
+                    await("Document video texture $path") { runOnMainSync { decoded=texture(field("video") as View) }; decoded?.isAvailable==true }
+                    await("Document rendered pixels $path") { brightness()>5.0 }
+                    val start=player.time; val light=brightness(); Thread.sleep(1100)
+                    check(player.time>start && kotlin.math.abs(brightness()-light)>3.0) { "Document frame did not advance: $path" }
+                    runOnMainSync { player.time=7000L }
+                    await("Document seek $path") { player.time in 6500L..10000L }
+                    check((field("inputMode") as String).contains("파일 핸들")) { "Document did not use Android descriptor" }
+                    runOnMainSync { activity!!.finish() }; Thread.sleep(700)
+                    activity=open(); player=field("player") as MediaPlayer
+                    await("Document resume $path") { player.isPlaying && player.time>=6000L }
+                    runOnMainSync { activity!!.finish() }; Thread.sleep(700)
+                    sendStatus(1,Bundle().apply { putString("stream","PASS document URI: $path; descriptor; pixels; seek; resume; software=$software\n") })
+                }
+                playbackUri=android.net.Uri.parse("content://${targetContext.packageName}.testmedia/denied")
+                activity=open(); waitForIdleSync()
+                await("Readable permission error") { (field("lastPlaybackError") as String).contains("E_PERMISSION") }
+                result.putString("stream","PASS: file playback/pixels/pinch/pan/speed/seek/resume; HTTP range bridge; content URI with Korean filename; offset/length document; software mode; permission error diagnostics.\n")
+                result.putInt("passed",28)
                 runOnMainSync { activity!!.finish() }
                 finish(Activity.RESULT_OK,result)
             } catch(e:Throwable) {
