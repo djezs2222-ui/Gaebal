@@ -2,7 +2,7 @@ plugins { id("com.android.application") }
 android {
     namespace = "kr.personal.tabletplayer"
     compileSdk = 37
-    defaultConfig { applicationId = "kr.personal.tabletplayer"; minSdk = 26; targetSdk = 35; versionCode = 4; versionName = "0.1.3"; testInstrumentationRunner = "kr.personal.tabletplayer.SmokeRunner" }
+    defaultConfig { applicationId = "kr.personal.tabletplayer"; minSdk = 26; targetSdk = 35; versionCode = 5; versionName = "0.1.4"; testInstrumentationRunner = "kr.personal.tabletplayer.SmokeRunner" }
     splits { abi { isEnable = true; reset(); include("arm64-v8a", "x86_64"); isUniversalApk = false } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     packaging { resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }

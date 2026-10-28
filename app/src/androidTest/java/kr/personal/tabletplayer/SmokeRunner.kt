@@ -55,25 +55,27 @@ class SmokeRunner: Instrumentation() {
                 val cx=coords[0]+viewport.width/2f; val cy=coords[1]+viewport.height/2f
                 val overlay=field("overlay") as View
                 check(overlay.alpha==.5f) { "Default opacity" }
-                Thread.sleep(700); check(overlay.visibility==View.GONE) { "Controls did not auto-hide" }
+                Thread.sleep(3300); check(overlay.visibility==View.GONE) { "Default 3-second controls did not auto-hide" }
                 swipe(cx,cy,cx,cy)
+                Thread.sleep(400)
                 check(overlay.visibility==View.VISIBLE) { "Single tap did not reveal controls" }
-                Thread.sleep(700); check(overlay.visibility==View.GONE) { "Controls did not hide after tap" }
+                Thread.sleep(3300); check(overlay.visibility==View.GONE) { "Controls did not hide after tap" }
                 runOnMainSync { PlayerActivity::class.java.getDeclaredMethod("controlOptions").apply { isAccessible=true }.invoke(activity) }
                 val options=field("controlsDialog") as AlertDialog
                 fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
                 runOnMainSync {
                     val views=descendants(options.window!!.decorView)
                     views.filterIsInstance<android.widget.SeekBar>().single().progress=60
-                    views.filterIsInstance<android.widget.EditText>().single().setText("0.15")
+                    views.filterIsInstance<android.widget.EditText>().first().setText("0.15")
                     options.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                     check(options.isShowing) { "Invalid 0.1-second step accepted" }
-                    views.filterIsInstance<android.widget.EditText>().single().setText("1.2")
+                    views.filterIsInstance<android.widget.EditText>().first().setText("1.2")
                     options.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 }
                 check(kotlin.math.abs(overlay.alpha-.7f)<.001f) { "Opacity option not applied" }
                 Thread.sleep(700); check(overlay.visibility==View.VISIBLE) { "Custom timeout ignored" }
                 Thread.sleep(700); check(overlay.visibility==View.GONE) { "Custom timeout did not expire" }
+                interactionChecks(activity as PlayerActivity,player,viewport)
                 pinch(cx,cy)
                 val video=field("video") as View
                 check(video.scaleX>1.4f) { "Pinch zoom was not applied: ${video.scaleX}" }
@@ -124,6 +126,60 @@ class SmokeRunner: Instrumentation() {
                 finish(Activity.RESULT_CANCELED,result)
             }
         }.start()
+    }
+    private fun interactionChecks(activity:PlayerActivity,player:MediaPlayer,viewport:View) {
+        fun field(name:String):Any=PlayerActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(activity)!!
+        fun method(name:String)=PlayerActivity::class.java.getDeclaredMethod(name).apply { isAccessible=true }
+        fun key(code:Int,meta:Int=0) { runOnMainSync {
+            activity.dispatchKeyEvent(KeyEvent(0,SystemClock.uptimeMillis(),KeyEvent.ACTION_DOWN,code,0,meta))
+            activity.dispatchKeyEvent(KeyEvent(0,SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,code,0,meta))
+        }; Thread.sleep(250) }
+        runOnMainSync { player.pause(); player.time=12000 }; Thread.sleep(300)
+        key(KeyEvent.KEYCODE_DPAD_LEFT); check(player.time in 8500L..9500L) { "Default keyboard 3 seconds: ${player.time}" }
+        key(KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.META_ALT_RIGHT_ON or KeyEvent.META_ALT_ON)
+        check(player.time in 13500L..14500L) { "Right Alt 5 seconds: ${player.time}" }
+        key(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.META_CTRL_LEFT_ON or KeyEvent.META_CTRL_ON)
+        check(player.time in 3500L..4500L) { "Left Ctrl 10 seconds: ${player.time}" }
+        key(KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.META_SHIFT_RIGHT_ON or KeyEvent.META_SHIFT_ON)
+        check(player.time>=player.length-500) { "Right Shift 30 seconds clamp: ${player.time}" }
+        // All four bracket pairs, including both physical sides of each modifier.
+        val metas=listOf(0,KeyEvent.META_ALT_LEFT_ON or KeyEvent.META_ALT_ON,KeyEvent.META_CTRL_RIGHT_ON or KeyEvent.META_CTRL_ON,KeyEvent.META_SHIFT_LEFT_ON or KeyEvent.META_SHIFT_ON)
+        metas.forEachIndexed { n,meta ->
+            runOnMainSync { player.time=(1000+n*4000).toLong() }; Thread.sleep(200); key(KeyEvent.KEYCODE_LEFT_BRACKET,meta)
+            runOnMainSync { player.time=(3000+n*4000).toLong() }; Thread.sleep(200); key(KeyEvent.KEYCODE_RIGHT_BRACKET,meta)
+        }
+        val segments=field("segments") as List<*>
+        check(segments.all { (it as PlaybackRules.Segment).valid() }) { "Keyboard segment endpoints" }
+        val seek=field("seek") as SegmentSeekBar
+        check(seek.segments.size==4) { "Four colored segment markers" }
+        runOnMainSync {
+            PlayerActivity::class.java.getDeclaredField("segmentEnabled").apply { isAccessible=true }.setBoolean(activity,true)
+            player.time=3000; method("checkSegments").invoke(activity)
+        }
+        Thread.sleep(250); check(player.time in 500L..1500L) { "Segment loop starts at first: ${player.time}" }
+        runOnMainSync { player.time=3100; method("checkSegments").invoke(activity) }
+        Thread.sleep(250); check(player.time in 4500L..5500L) { "Segment loop advances: ${player.time}" }
+        runOnMainSync { PlayerActivity::class.java.getDeclaredField("segmentEnabled").apply { isAccessible=true }.setBoolean(activity,false) }
+        val coords=IntArray(2); runOnMainSync { viewport.getLocationOnScreen(coords) }
+        val x=coords[0]+viewport.width/2f; val y=coords[1]+viewport.height*.3f
+        swipe(x,y,x,y); Thread.sleep(80); swipe(x,y,x,y); Thread.sleep(400)
+        check(player.isPlaying) { "Center double tap did not resume" }
+        swipe(x,y,x,y); Thread.sleep(80); swipe(x,y,x,y); Thread.sleep(400)
+        check(!player.isPlaying) { "Center double tap did not pause" }
+        val lx=coords[0]+viewport.width*.15f
+        swipe(lx,y,lx,y-100); Thread.sleep(250)
+        check(activity.window.attributes.screenBrightness>=.01f) { "Brightness swipe" }
+        runOnMainSync { player.time=12000; player.play() }; Thread.sleep(250)
+        val begin=PlayerActivity::class.java.getDeclaredMethod("beginHold",Int::class.javaPrimitiveType).apply { isAccessible=true }
+        runOnMainSync { begin.invoke(activity,0) }; Thread.sleep(900)
+        check(player.time<11500) { "Reverse hold did not seek backwards" }
+        runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(250)
+        check(player.isPlaying) { "Release did not restore playing state" }
+        runOnMainSync { player.pause(); begin.invoke(activity,2) }; Thread.sleep(700)
+        runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(200)
+        check(!player.isPlaying) { "Release did not preserve paused state" }
+        runOnMainSync { player.play() }
+        sendStatus(1,Bundle().apply { putString("stream","PASS interactions: keyboard seek/modifier sides, four bracket segments/markers/cycling, center double tap, brightness swipe, reverse/forward hold state restoration.\n") })
     }
     private fun queueChecks(clip:File) {
         val entries=(0 until 21).map { n -> val f=File(targetContext.filesDir,"queue-video-$n.mp4"); clip.copyTo(f,true); QueueEntry(android.net.Uri.fromFile(f).toString(),"Video %02d.mp4".format(20-n),n.toLong()*100,21L-n) }

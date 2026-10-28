@@ -42,6 +42,12 @@ class MainActivity: Activity() {
         openedUri=state?.getString("openedUri"); playlistFiles.restore(state)
         contentResolver.persistedUriPermissions.filter { it.isReadPermission }.forEach { grant -> try { roots.add((prefs.getString("label:${grant.uri}",null) ?: "연결된 저장소") to Storage.tree(this,grant.uri)) } catch(_:Exception) {} }
         home()
+        if(state==null && !prefs.getBoolean("setupShown",false)) {
+            prefs.edit().putBoolean("setupShown",true).apply()
+            AlertDialog.Builder(this).setTitle("영상 폴더 연결")
+                .setMessage("자주 사용하는 영상 폴더를 한 번 연결하면 다음부터 같은 폴더의 영상을 바로 목록으로 재생합니다. SD·USB는 연결 후 각각 허용하고 NAS는 별도로 로그인하세요.")
+                .setPositiveButton("영상 폴더 연결") { _,_ -> askStorage() }.setNegativeButton("나중에",null).show()
+        }
     }
     private fun page(title:String) {
         val outer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,12,20,12) }
@@ -80,7 +86,9 @@ class MainActivity: Activity() {
         val label=EditText(this).apply { hint="예: 내부 Movies / SD 영상 / USB" }
         AlertDialog.Builder(this).setTitle("저장소 표시 이름").setView(label).setPositiveButton("폴더 연결") { _,_ ->
             prefs.edit().putString("newLabel",label.text.toString().ifBlank { "연결된 저장소" }).apply()
-            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION),1)
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).apply {
+                prefs.getString("lastVideoFolder",null)?.let { putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,Uri.parse(it)) }
+            },1)
         }.setNegativeButton("취소",null).show()
     }
     private fun load() {
@@ -204,6 +212,7 @@ class MainActivity: Activity() {
         startActivity(launch)
     }
     private fun playFolder(id:String,parent:Node) {
+        prefs.edit().putString("lastVideoFolder",parent.id).apply()
         background("폴더의 영상과 하위 폴더 확인 중",{ Playlists.scan(parent) { cancel.get() } }) { scan ->
             val direct=scan.direct.toMutableList()
             var at=direct.indexOfFirst { Playlists.sameDocument(it.id,id) }
@@ -230,11 +239,12 @@ class MainActivity: Activity() {
         background("영상 폴더 권한 확인",{ Playlists.parent(this,id) }) { parent ->
             if(parent!=null) playFolder(id,parent) else {
                 openedUri=id
-                AlertDialog.Builder(this).setTitle("같은 폴더 영상으로 임시 목록 만들기").setMessage("Android의 파일 하나 열기 권한으로는 옆 파일을 읽을 수 없습니다. 선택한 영상이 들어 있는 폴더를 한 번 허용해 주세요.")
-                    .setPositiveButton("영상 폴더 선택") { _,_ ->
-                        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
-                        intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,Uri.parse(id)); startActivityForResult(intent,4)
-                    }.setNegativeButton("이 영상만 재생") { _,_ -> openedUri=null; background("영상 준비",{ Playlists.entry(this,id) }) { launchQueue(listOf(it),0,true,"임시 재생목록") } }.setCancelable(false).show()
+                // Go straight to the permission picker, starting at the video's parent.
+                val picker=Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                val initial=Playlists.parentHint(this,id) ?: prefs.getString("lastVideoFolder",null)?.let(Uri::parse)
+                if(initial!=null) picker.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,initial)
+                Toast.makeText(this,"영상 폴더를 한 번 허용하세요. 취소하면 선택한 영상만 재생합니다",Toast.LENGTH_LONG).show()
+                startActivityForResult(picker,4)
             }
         }
     }

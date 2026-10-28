@@ -48,6 +48,14 @@ object Playlists {
         } catch(_:Exception) {}
         return null
     }
+    /** A hint, never a grant: opaque provider IDs cannot safely be treated as paths. */
+    fun parentHint(context:Context,id:String):Uri? = try {
+        val uri=Uri.parse(id)
+        if(uri.authority=="com.android.externalstorage.documents" && DocumentsContract.isDocumentUri(context,uri)) {
+            val document=DocumentsContract.getDocumentId(uri)
+            if(document.contains('/')) DocumentsContract.buildDocumentUri(uri.authority,document.substringBeforeLast('/')) else null
+        } else null
+    } catch(_:Exception) { null }
     data class Folder(val label:String,val node:Node,val videos:List<QueueEntry>)
     data class Scan(val direct:List<QueueEntry>,val folders:List<Folder>)
     fun scan(folder:Node,cancel:()->Boolean={false}):Scan {
