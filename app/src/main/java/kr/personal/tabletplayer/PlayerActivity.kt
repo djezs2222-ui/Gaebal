@@ -20,9 +20,10 @@ class PlayerActivity : Activity() {
     private var controlsOpacity=50
     private var hideDelayMs=500L
     private var controlsDialog:AlertDialog?=null
+    private var controlTouchActive=false
     private var optionsOpen=false
-    private val hideControls=Runnable { if(!dragging && !optionsOpen) overlay.visibility=View.GONE }
-    private fun showControls() { overlay.visibility=View.VISIBLE; handler.removeCallbacks(hideControls); if(!dragging && !optionsOpen) handler.postDelayed(hideControls,hideDelayMs) }
+    private val hideControls=Runnable { if(!dragging && !optionsOpen && !controlTouchActive) overlay.visibility=View.GONE }
+    private fun showControls() { overlay.visibility=View.VISIBLE; handler.removeCallbacks(hideControls); if(!dragging && !optionsOpen && !controlTouchActive) handler.postDelayed(hideControls,hideDelayMs) }
     private lateinit var clock: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var scale = 1f
@@ -44,7 +45,7 @@ class PlayerActivity : Activity() {
     private var resumeAfterPicker=false
     private var stateFileName="queue-${java.util.UUID.randomUUID()}.json"
     private var queueTitle="임시 재생목록"
-    private var queueSort=0
+    private var queueSort=-1
     private var queueDescending=false
     private var queueDialog:AlertDialog?=null
     private val playlistFiles by lazy { PlaylistFiles(this) { items,at,title ->
@@ -107,7 +108,7 @@ class PlayerActivity : Activity() {
         index = (state?.getInt("queueIndex") ?: intent.getIntExtra("index", 0)).coerceIn(0, (queue.size-1).coerceAtLeast(0))
         temporary=state?.getBoolean("temporary") ?: intent.getBooleanExtra("temporary",true)
         queueTitle=state?.getString("queueTitle") ?: intent.getStringExtra("queueTitle") ?: "임시 재생목록"
-        queueSort=state?.getInt("queueSort") ?: 0; queueDescending=state?.getBoolean("queueDescending") ?: false
+        queueSort=state?.getInt("queueSort") ?: -1; queueDescending=state?.getBoolean("queueDescending") ?: false
         playlistFiles.restore(state)
         player.setEventListener { event -> runOnUiThread {
             when(event.type) {
@@ -168,11 +169,20 @@ class PlayerActivity : Activity() {
         })
         open(); showControls()
     }
+    override fun dispatchTouchEvent(event:MotionEvent):Boolean {
+        if(::overlay.isInitialized && event.actionMasked==MotionEvent.ACTION_DOWN && overlay.visibility==View.VISIBLE) {
+            val bounds=android.graphics.Rect()
+            if(overlay.getGlobalVisibleRect(bounds) && bounds.contains(event.rawX.toInt(),event.rawY.toInt())) { controlTouchActive=true; handler.removeCallbacks(hideControls) }
+        }
+        val handled=super.dispatchTouchEvent(event)
+        if(controlTouchActive && event.actionMasked in listOf(MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL)) { controlTouchActive=false; showControls() }
+        return handled
+    }
     private fun currentQueue() {
         if(queueItems.isEmpty()) return
         handler.removeCallbacks(hideControls); optionsOpen=true
         val form=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        val sort=Button(this).apply { text="정렬: ${listOf("이름","크기","날짜")[queueSort]} ${if(queueDescending) "내림차순" else "오름차순"}" }
+        val sort=Button(this).apply { text=if(queueSort<0) "정렬: 원래 목록 순서" else "정렬: ${listOf("이름","크기","날짜")[queueSort]} ${if(queueDescending) "내림차순" else "오름차순"}" }
         form.addView(sort)
         val list=ListView(this)
         list.adapter=ArrayAdapter(this,android.R.layout.simple_list_item_activated_1,queueItems.mapIndexed { n,item -> "${if(n==index) "▶ " else ""}${item.name}\n${item.size/1_000_000}MB · ${if(item.date>0) java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US).format(java.util.Date(item.date)) else "날짜 알 수 없음"}" })
