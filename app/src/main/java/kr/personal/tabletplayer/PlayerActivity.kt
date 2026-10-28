@@ -99,11 +99,14 @@ class PlayerActivity : Activity() {
         if(ready && player.isSeekable) player.time=target.coerceIn(0,player.length.coerceAtLeast(0))
     }
     private fun jump(seconds:Int) { if(ready) { seekTo(player.time+seconds*1000L); showControls() } }
-    private fun togglePlaying() { if(ready) { if(player.isPlaying) player.pause() else player.play(); showControls() } }
+    private fun togglePlaying() {
+        if(!ready && queue.isNotEmpty()) { open(); showControls(); return }
+        if(ready) { if(player.isPlaying) player.pause() else player.play(); showControls() }
+    }
     private fun volumePercent(percent:Int) {
         val max=audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
         val current=audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-        val step=kotlin.math.ceil(max*percent/100.0).toInt().let { if(percent<0) it.coerceAtMost(-1) else it.coerceAtLeast(1) }
+        val step=kotlin.math.round(max*percent/100.0).toInt().let { if(percent<0) it.coerceAtMost(-1) else it.coerceAtLeast(1) }
         setVolume(current+step)
     }
     private fun setVolume(value:Int) {
@@ -196,7 +199,8 @@ class PlayerActivity : Activity() {
         override fun run() {
             if (!ready) return
             if (!dragging && player.length > 0) seek.progress = (player.time * 1000 / player.length).toInt()
-            clock.text = "${time(player.time)} / ${time(player.length)}"
+            clock.text = "${time(player.time)} / ${time(player.length)}"+if(segmentEnabled && activeSegment>=0) " · 구간 ${activeSegment+1} 반복" else ""
+            updateMarkers()
             checkSegments(); if(SystemClock.elapsedRealtime()-lastSaveAt>=1000) { savePosition(); lastSaveAt=SystemClock.elapsedRealtime() }
             handler.postDelayed(this, 100)
         }
@@ -307,7 +311,7 @@ class PlayerActivity : Activity() {
                     tapCandidate=false; touchConsumed=true; endHold(); previousSpan=span(e); focusX=(e.getX(0)+e.getX(1))/2; focusY=(e.getY(0)+e.getY(1))/2
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if(kotlin.math.hypot(e.x-tapX,e.y-tapY)>slop) tapCandidate=false
+                    if(kotlin.math.hypot(e.x-tapX,e.y-tapY)>slop) { tapCandidate=false; if(holdDirection!=0) endHold() }
                     if(e.pointerCount>=2) {
                         val nextSpan=span(e)
                         val nextX=(e.getX(0)+e.getX(1))/2; val nextY=(e.getY(0)+e.getY(1))/2

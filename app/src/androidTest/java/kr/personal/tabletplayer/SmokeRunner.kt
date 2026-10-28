@@ -92,6 +92,8 @@ class SmokeRunner: Instrumentation() {
                 activity=open(); player=field("player") as MediaPlayer
                 check(kotlin.math.abs((field("overlay") as View).alpha-.7f)<.001f && field("hideDelayMs")==1200L) { "Control preferences not retained" }
                 await("Resume position") { player.isPlaying && player.time>=saved-1200 }
+                check(field("jumpSeconds")==4 && field("altSeconds")==6 && field("ctrlSeconds")==12 && field("shiftSeconds")==31 && field("volumeStep")==4 && field("holdMultiplier")==3f) { "New options did not persist after closing" }
+                check((field("segments") as List<*>).all { (it as PlaybackRules.Segment).valid() }) { "Segment endpoints did not persist" }
                 runOnMainSync { activity!!.finish() }; Thread.sleep(700)
                 for((path,software) in listOf("영상 한글.mp4" to false,"offset.mp4" to true)) {
                     playbackUri=android.net.Uri.Builder().scheme("content").authority(targetContext.packageName+".testmedia").appendPath(path).build()
@@ -169,6 +171,18 @@ class SmokeRunner: Instrumentation() {
         val lx=coords[0]+viewport.width*.15f
         swipe(lx,y,lx,y-100); Thread.sleep(250)
         check(activity.window.attributes.screenBrightness>=.01f) { "Brightness swipe" }
+        val audio=targetContext.getSystemService(AudioManager::class.java)
+        val max=audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        runOnMainSync { audio.setStreamVolume(AudioManager.STREAM_MUSIC,max/2,0) }
+        val volume=audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        key(KeyEvent.KEYCODE_DPAD_UP); check(audio.getStreamVolume(AudioManager.STREAM_MUSIC)>volume) { "Keyboard volume up" }
+        key(KeyEvent.KEYCODE_DPAD_DOWN); check(audio.getStreamVolume(AudioManager.STREAM_MUSIC)<=volume) { "Keyboard volume down" }
+        val rx=coords[0]+viewport.width*.85f
+        runOnMainSync { player.time=10000 }; Thread.sleep(200)
+        swipe(lx,y,lx,y); Thread.sleep(80); swipe(lx,y,lx,y); Thread.sleep(350)
+        check(player.time in 6500L..7500L) { "Left double tap 3 seconds: ${player.time}" }
+        swipe(rx,y,rx,y); Thread.sleep(80); swipe(rx,y,rx,y); Thread.sleep(350)
+        check(player.time in 9500L..10500L) { "Right double tap 3 seconds: ${player.time}" }
         runOnMainSync { player.time=12000; player.play() }; Thread.sleep(250)
         val begin=PlayerActivity::class.java.getDeclaredMethod("beginHold",Int::class.javaPrimitiveType).apply { isAccessible=true }
         runOnMainSync { begin.invoke(activity,0) }; Thread.sleep(900)
@@ -178,7 +192,16 @@ class SmokeRunner: Instrumentation() {
         runOnMainSync { player.pause(); begin.invoke(activity,2) }; Thread.sleep(700)
         runOnMainSync { method("endHold").invoke(activity) }; Thread.sleep(200)
         check(!player.isPlaying) { "Release did not preserve paused state" }
-        runOnMainSync { player.play() }
+        runOnMainSync {
+            method("controlOptions").invoke(activity)
+            val dialog=field("controlsDialog") as AlertDialog
+            fun descendants(v:View):List<View> = listOf(v)+(if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList())
+            val fields=descendants(dialog.window!!.decorView).filterIsInstance<android.widget.EditText>()
+            listOf("4","6","12","31","4","3").forEachIndexed { n,value -> fields[n+1].setText(value) }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            check(!dialog.isShowing) { "Valid playback options rejected" }
+            player.play()
+        }
         sendStatus(1,Bundle().apply { putString("stream","PASS interactions: keyboard seek/modifier sides, four bracket segments/markers/cycling, center double tap, brightness swipe, reverse/forward hold state restoration.\n") })
     }
     private fun queueChecks(clip:File) {
