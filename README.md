@@ -1,5 +1,9 @@
 # 태블릿 플레이어 0.1.0
 
+**클라우드 빌드와 재생·프레임·핀치·팬·배속·탐색·이어보기 검증을 통과했습니다.**
+
+[APK 바로 다운로드 — 약 61MB](https://github.com/djezs2222-ui/Gaebal/releases/download/player-test-0.1.0-5/TabletPlayer-0.1.0-arm64.apk) · [검증 결과](VERIFICATION.md)
+
 개인 실사용을 위한 Kotlin + LibVLC Android 앱의 첫 테스트 버전입니다. 태블릿용 설치 파일은 `TabletPlayer-0.1.0-arm64.apk`입니다. Android 8 이상 ARM64 기기를 대상으로 합니다. 실제 태블릿·NAS·SD·USB 검증은 아직 완료되지 않았습니다.
 
 ## 태블릿에서 설치
